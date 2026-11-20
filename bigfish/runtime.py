@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .backup import ensure_key_consistency
 from .config import Settings
-from .core import Council
+from .core import Council, CouncilError
 from .db import Database
 from .security import load_or_create_key
 
@@ -18,7 +18,7 @@ def open_council(settings: Settings, key: bytes | None = None) -> tuple[Database
         ensure_key_consistency(db, settings.key_path)
     except Exception as exc:
         db.close()
-        raise RuntimeError("执行票密钥一致性校验失败，拒绝启动") from exc
+        raise CouncilError("执行票密钥一致性校验失败，拒绝启动") from exc
     if key is None:
         key = load_or_create_key(settings.key_path)
     council = Council(
