@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "bigfish-council": {
+      "type": "http",
+      "url": "http://127.0.0.1:3098/mcp",
+      "headers": {
+        "Authorization": "Bearer <把 executor-add 打印出来的 bfc_ex_... 填在这里>",
+        "Accept": "application/json, text/event-stream"
+      },
+      "timeoutMs": 30000
+    }
+  }
+}
