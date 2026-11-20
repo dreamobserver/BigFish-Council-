@@ -127,7 +127,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="本机回环端口上还有服务在跑时，仍然强行恢复（危险）")
 
     a = p.parse_args(argv)
-    s, db, council = build(a.data_dir)
+    if a.cmd == "restore":
+        # 恢复前先做端口预检，再打开数据库；open_council 可能执行 schema / key 自愈。
+        s = Settings.load(Path(a.data_dir).expanduser() if a.data_dir else None)
+        if not a.force and _port_busy(s.api_host, s.api_port):
+            print(f"拒绝恢复：{s.api_host}:{s.api_port} 上还有服务在监听，"
+                  "请先停掉它（tools/stop-headless.ps1 或关闭 GUI），"
+                  "确认没有其他实例后再重试；确实要强行恢复请加 --force。",
+                  file=sys.stderr)
+            return 2
+        db, council = open_council(s)
+    else:
+        s, db, council = build(a.data_dir)
 
     if a.cmd == "init":
         print(f"数据目录: {s.data_dir}\n数据库: {s.db_path}\n密钥: {s.key_path}")
@@ -209,15 +220,6 @@ def main(argv: list[str] | None = None) -> int:
         dump(inspect_bundle(a.path))
         return 0
     if a.cmd == "restore":
-        # R8 的跨进程那半边：维护模式只能管住**本进程**的连接，管不住另一个
-        # 正在跑的 headless/GUI。替换文件时对方仍持有旧连接，POSIX 上会继续写
-        # 旧 inode（数据静默分叉），Windows 上会直接替换失败。所以先探端口。
-        if not a.force and _port_busy(s.api_host, s.api_port):
-            print(f"拒绝恢复：{s.api_host}:{s.api_port} 上还有服务在监听，"
-                  "请先停掉它（tools/stop-headless.ps1 或关闭 GUI），"
-                  "确认没有其他实例后再重试；确实要强行恢复请加 --force。",
-                  file=sys.stderr)
-            return 2
         dump(council.restore_from_bundle(a.path))
         return 0
     if a.cmd == "reenable":

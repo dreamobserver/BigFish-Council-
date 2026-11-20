@@ -11,12 +11,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bigfish import state as S
 from bigfish.backup import ensure_key_consistency
+from bigfish.config import Settings
+from bigfish.runtime import open_council
 from bigfish.core import Council, CouncilError
 from bigfish.db import Database
 from bigfish.security import load_or_create_key
@@ -131,6 +134,18 @@ class TestKeyRotationInvalidatesTickets(Base):
         self.assertTrue(self.key_path.exists())
         with self.assertRaises(CouncilError):
             self.c.heartbeat(p["ticket"], self.ex, "running")
+
+
+class TestStartupFailsClosed(unittest.TestCase):
+    def test_open_council_refuses_to_start_when_key_repair_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Settings(data_dir=Path(tmp))
+            with patch("bigfish.runtime.ensure_key_consistency",
+                       side_effect=OSError("模拟密钥修复失败")):
+                with patch("bigfish.runtime.load_or_create_key") as load_key:
+                    with self.assertRaisesRegex(RuntimeError, "密钥一致性校验失败"):
+                        open_council(settings)
+                    load_key.assert_not_called()
 
 
 if __name__ == "__main__":

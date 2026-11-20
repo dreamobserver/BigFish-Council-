@@ -12,12 +12,13 @@ def open_council(settings: Settings, key: bytes | None = None) -> tuple[Database
     settings.ensure_dirs()
     db = Database(settings.db_path)
     db.init_schema()
-    # B2 自愈：如果上次恢复在「换库」和「换密钥」之间被杀，
-    # 这里的指纹不一致检测会把密钥重新轮换，保证旧执行票不会复活。
+    # B2 自愈是安全边界：密钥指纹不一致且无法修复时必须拒绝启动。
+    # 继续使用未核验的磁盘密钥可能让旧执行票在恢复异常路径上继续有效。
     try:
         ensure_key_consistency(db, settings.key_path)
-    except Exception:      # 自愈失败不阻止启动，但会留在 audit / 日志里
-        pass
+    except Exception as exc:
+        db.close()
+        raise RuntimeError("执行票密钥一致性校验失败，拒绝启动") from exc
     if key is None:
         key = load_or_create_key(settings.key_path)
     council = Council(

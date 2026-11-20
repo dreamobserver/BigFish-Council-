@@ -500,14 +500,10 @@ def restore_bundle(db: Database, path: str | Path, key_path: str | Path | None =
 
     db.enter_maintenance("正在从备份恢复数据库")
     try:
-        captured_epoch = db.restore_epoch()
-    except Exception:
-        captured_epoch = 0
-    new_epoch = captured_epoch + 1
-
-    try:
       with _restore_lock(original_dir / (target.name + ".restore.lock")):
        with db._allow_during_maintenance():
+        # 必须在维护旁路内读取真实活库世代；不能把 MaintenanceError 吞成 0。
+        captured_epoch = db.restore_epoch()
         try:
             with zipfile.ZipFile(p) as z:
                 with z.open(DB_NAME) as src, open(staging, "wb") as dst:

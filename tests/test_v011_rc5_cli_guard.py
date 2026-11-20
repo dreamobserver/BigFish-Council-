@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -74,6 +75,14 @@ class TestCliRestoreGuard(unittest.TestCase):
             stop.set()
             srv.close()
             th.join(timeout=2)
+
+    def test_busy_port_is_checked_before_database_open(self):
+        with patch("bigfish.cli._port_busy", return_value=True), \
+             patch("bigfish.cli.open_council") as open_db:
+            rc = cli.main(["--data-dir", self.dir, "restore",
+                           str(Path(self.dir) / "x.zip")])
+        self.assertEqual(rc, 2)
+        open_db.assert_not_called()
 
     def test_force_bypasses_the_guard(self):
         """--force 必须真的放行：端口占着也继续往下走，走到读包那步才失败。

@@ -196,6 +196,17 @@ class TestRestoreFreezesApproved(Base):
             self.db.one("SELECT COUNT(*) AS c FROM tickets WHERE revoked_at IS NULL")["c"], 0)
 
 
+    def test_restore_epoch_is_monotonic_when_restoring_an_older_snapshot(self):
+        older_snapshot = self.bundle()
+        with self.db.tx() as c:
+            c.execute("UPDATE meta SET value='7' WHERE key='restore_epoch'")
+
+        out = self.c.restore_from_bundle(older_snapshot)
+
+        self.assertEqual(out["restore_epoch"], 8)
+        self.assertEqual(self.db.restore_epoch(), 8)
+
+
 # ======================================================================
 # R1-4 重放路径不能再签发已被撤销的票
 # ======================================================================
@@ -281,6 +292,59 @@ class TestMaintenanceMode(Base):
         self.db.enter_maintenance("现在可以了", timeout=5)
         self.assertTrue(self.db.in_maintenance())
         self.db.exit_maintenance()
+
+    def _assert_guard_lock_order(self, operation):
+        checked = threading.Event()
+        release = threading.Event()
+        worker_errors = []
+        original_guard = self.db._guard
+        entered_maintenance_before_operation = False
+
+        def blocked_guard():
+            original_guard()
+            checked.set()
+            if not release.wait(5):
+                raise RuntimeError("测试同步等待超时")
+
+        def run_operation():
+            try:
+                operation()
+            except Exception as exc:
+                worker_errors.append(exc)
+
+        self.db._guard = blocked_guard
+        worker = threading.Thread(target=run_operation, daemon=True)
+        try:
+            worker.start()
+            self.assertTrue(checked.wait(5), "操作没有到达维护检查点")
+            try:
+                self.db.enter_maintenance("guard/lock race", timeout=0.05)
+            except MaintenanceError:
+                pass
+            else:
+                entered_maintenance_before_operation = True
+                self.db.exit_maintenance()
+        finally:
+            release.set()
+            worker.join(5)
+            self.db._guard = original_guard
+            if self.db.in_maintenance():
+                self.db.exit_maintenance()
+
+        self.assertFalse(worker.is_alive(), "并发操作线程没有退出")
+        self.assertFalse(
+            entered_maintenance_before_operation,
+            "维护模式在操作已通过 guard、尚未取得锁时插入，说明检查与加锁不是原子的")
+        self.assertEqual(worker_errors, [])
+
+    def test_query_guard_is_atomic_with_lock(self):
+        self._assert_guard_lock_order(lambda: self.db.query("SELECT 1"))
+
+    def test_transaction_guard_is_atomic_with_lock(self):
+        def operation():
+            with self.db.tx() as c:
+                c.execute("SELECT 1")
+        self._assert_guard_lock_order(operation)
 
     def test_restore_always_exits_maintenance(self):
         self.approved()

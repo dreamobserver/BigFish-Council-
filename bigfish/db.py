@@ -445,18 +445,19 @@ class Database:
         return self._conn
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
-        self._guard()
+        # 锁与维护标志必须在同一个临界区内检查，避免「先过 guard、后等锁」的竞态。
         with self._lock:
+            self._guard()
             return list(self._conn.execute(sql, tuple(params)).fetchall())
 
     def one(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
-        self._guard()
         with self._lock:
+            self._guard()
             return self._conn.execute(sql, tuple(params)).fetchone()
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
-        self._guard()
         with self._lock:
+            self._guard()
             return self._conn.execute(sql, tuple(params))
 
     class _Tx:
@@ -468,25 +469,22 @@ class Database:
             self.sp = ""
 
         def __enter__(self):
-            self.db._guard()          # 维护模式：连锁都不抢，直接报错
+            # 先拿锁、再检查维护标志：enter_maintenance() 与本次检查因此有确定顺序。
             self.db._lock.acquire()
-            if self.db._depth == 0:
-                try:
+            try:
+                self.db._guard()
+                if self.db._depth == 0:
                     self.db._conn.execute("BEGIN IMMEDIATE")
                     self.outer = True
-                except Exception:
-                    # BEGIN 失败必须把锁还回去，否则整库写操作永久卡死
-                    self.db._lock.release()
-                    raise
-            else:
-                self.sp = f"sp_{self.db._depth}"
-                try:
+                else:
+                    self.sp = f"sp_{self.db._depth}"
                     self.db._conn.execute(f"SAVEPOINT {self.sp}")
-                except Exception:
-                    self.db._lock.release()
-                    raise
-            self.db._depth += 1
-            return self.db._conn
+                self.db._depth += 1
+                return self.db._conn
+            except BaseException:
+                # guard / BEGIN / SAVEPOINT 任一步失败都必须归还锁。
+                self.db._lock.release()
+                raise
 
         def __exit__(self, exc_type, exc, tb):
             self.db._depth -= 1
