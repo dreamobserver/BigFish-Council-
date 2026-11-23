@@ -63,7 +63,9 @@ tests/test_v011_p2.py 29/4   test_v011_rc4.py 9/2   test_v011_rc5_review_audit.p
 
 172|            others = _probe_other_writers(db_path)
 173|            if others:
-174|                raise LeaseError("还有进程在用这个数据库（" + ", ".join(others) + "），拒绝替换。")
+174|                raise LeaseError(
+175|                    "还有进程在用这个数据库（" + ", ".join(others) +
+176|                    "），拒绝替换。请先关闭 GUI / 停掉 headless 服务。")
 180|                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
 ```
 
@@ -75,7 +77,7 @@ tests/test_v011_p2.py 29/4   test_v011_rc4.py 9/2   test_v011_rc5_review_audit.p
 
 ```python
 37|SLOTS = 64
-43|_LOCAL: dict[str, list] = {}      # 路径 -> [句柄, 引用计数, 槽位号]
+43|_LOCAL: dict[str, list] = {}
 44|_LOCAL_LOCK = threading.Lock()
 51|def access_lock_path(db_path: Path) -> Path:
 53|    return p.with_name(p.name + ".access.lock")
@@ -101,8 +103,9 @@ tests/test_v011_p2.py 29/4   test_v011_rc4.py 9/2   test_v011_rc5_review_audit.p
 125|            self._acquire_windows()
 127|        fh = _open_rw(self._lock_path)
 128|        if not _posix_flock(fh, exclusive=False):
-130|            raise LeaseError("数据库正在恢复或维护中，暂时不能打开（"
-131|                             + str(self._lock_path) + "）。请稍后重试。")
+130|            raise LeaseError(
+131|                "数据库正在恢复或维护中，暂时不能打开（"
+132|                + str(self._lock_path) + "）。请稍后重试。")
 ```
 
 Windows 分支要处理 rc6 平台 B 踩出来的坑：`msvcrt.locking` 的区间锁按**文件句柄**记，同进程第二个句柄锁同一区间必 `EACCES`。所以先查 `_LOCAL`，已有人持锁就共享句柄、只加计数：
@@ -113,8 +116,8 @@ Windows 分支要处理 rc6 平台 B 踩出来的坑：`msvcrt.locking` 的区�
 139|            held = _LOCAL.get(key)
 140|            if held is not None:
 141|                held[1] += 1                  # 同进程已在用，共享句柄
-142|                self._fh, self._slot = held[0], held[2]
-145|                return
+142|                self._fh = held[0]
+144|                self._slot = held[2]
 149|        start = os.getpid() % SLOTS
 150|        for i in range(SLOTS):
 152|            if _win_try_lock(fh, slot, 1):
@@ -144,7 +147,7 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 224|    fh = _open_rw(lock_path)
 225|    deadline = time.monotonic() + max(0.0, timeout)
 227|    while True:
-229|            ok = _win_try_lock(fh, 0, SLOTS)          # 一次锁 [0, 64)
+229|            ok = _win_try_lock(fh, 0, SLOTS)
 231|            ok = _posix_flock(fh, exclusive=True)
 232|        if ok or time.monotonic() >= deadline:
 234|        time.sleep(0.05)
@@ -245,8 +248,8 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 44|    # 只读 + 可留言。刻意不含 task.claim / run.* / approve / backup.*：
 45|    # 手机丢了也不至于能把任务领走或把库导出去。
 46|    MOBILE_VIEWER: {"task.read", "event.read", "review.create"},
-53|_DB_ROLE_MAP = {"executor": EXECUTOR_DSH, "reviewer": None, "admin": HUMAN_OWNER,
-54|                "mobile": MOBILE_VIEWER}
+54|_DB_ROLE_MAP = {"executor": EXECUTOR_DSH, "reviewer": None, "admin": HUMAN_OWNER,
+55|                "mobile": MOBILE_VIEWER}
 ```
 
 改前 `ALL_ROLES` 是四元组、`_DB_ROLE_MAP` 三键，上面那段注释写的是「mobile 尚未实现，故意不登记」。实现之后那句注释就成了错误文档，所以整段重写为「未登记 = 拿到执行器权限」这条铁律 + 新增角色必须同时改三处的清单（`:48-52`）。还有一处判定写法变化：`:85` 从 `if base is not None: return base` 改成 `if db_role in _DB_ROLE_MAP and base is not None`。行为等价（未登记时 `base` 必为 `None`），但旧写法读起来像「碰巧有值就返回」，新写法是「先确认它在白名单里」——这段代码正是「未登记会被兜底成执行器」的地方，读错代价最大。
@@ -256,10 +259,10 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 ## 4. `bigfish/core.py`（6 / 3）
 
 ```python
-162|        if role not in R.DB_ROLES:
-163|            raise CouncilError("role 只能是 " + " / ".join(sorted(R.DB_ROLES)))
+163|        if role not in R.DB_ROLES:
+164|            raise CouncilError("role 只能是 " + " / ".join(sorted(R.DB_ROLES)))
 173|        prefix = {"executor": "bfc_ex_", "reviewer": "bfc_rv_", "admin": "bfc_ad_",
-174|                  "mobile": "bfc_mb_"}
+174|                  "mobile": "bfc_mb_"}[role]
 ```
 
 改前是硬编码 `if role not in ("executor", "reviewer", "admin"): raise CouncilError("role 只能是 executor / reviewer / admin")` 与三项前缀字典。硬编码的问题在于它与 `_DB_ROLE_MAP` 是两份独立的真相：加 mobile 时漏改前者 = 功能不可用，漏改前缀字典 = `KeyError`，漏改映射表 = 提权。改成读 `R.DB_ROLES` 之后只剩一份真相，错误文案也自动跟着变。
@@ -299,7 +302,9 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 135|            # BFC-04：布尔名叫 contains_plaintext_credentials 时，写 False 等于
 136|            # 对外宣称「我检查过了、保证没有」。这不能由「白名单里没有 token 列」
 137|            # 推出来，属于过强声明。改成枚举，只描述**实际观测到的事实**：
-138|            #   none / hashes-only / pattern-scrubbed-unverified
+138|            #   none                          —— 明确不含任何凭据形态
+139|            #   hashes-only                   —— 只含不可逆哈希，无明文（本包）
+140|            #   pattern-scrubbed-unverified   —— 按已知模式脱敏过，未证明干净（审计包）
 141|            "credential_status": "hashes-only",
 142|            "credential_detail": (
 143|                "含 executors.token_hash 与 tickets.token_hash（SHA-256，不可逆）；"
@@ -366,10 +371,10 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 改前断言 `assertNotIn("mobile", R.DB_ROLES, "未实现的 mobile 角色不该被默认当成执行器")`。实现落地后必须反过来，但要守的性质没变：
 
 ```python
-472|        self.assertIn("mobile", R.DB_ROLES)
-473|        self.assertEqual(R.role_for_db_row("mobile"), R.MOBILE_VIEWER)
-474|        self.assertFalse(R.can(R.role_for_db_row("mobile"), "task.claim"),
-475|                         "登记 mobile 不等于给执行权")
+473|        self.assertIn("mobile", R.DB_ROLES)
+474|        self.assertEqual(R.role_for_db_row("mobile"), R.MOBILE_VIEWER)
+475|        self.assertFalse(R.can(R.role_for_db_row("mobile"), "task.claim"),
+476|                         "登记 mobile 不等于给执行权")
 ```
 
 这类改写的风险是「为了变绿而改断言」。这里不是：改前守「别让未实现的角色拿到执行器权限」，改后守「登记了也不给执行权」——后者更严，它直接验了 `task.claim`。
