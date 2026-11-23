@@ -1,8 +1,8 @@
 # BFC v0.1.1-rc7 交付说明
 
-> 本文每个数字都来自本轮实跑：全量单测 294 项在 Debian 12 / Python 3.11.2 上跑完 `RC=0`，
+> 本文每个数字都来自本轮实跑：全量单测 295 项在 Debian 12 / Python 3.11.2 上跑完 `RC=0`，
 > 自检 16 项、GUI 冒烟 9 项全过，pyflakes 零输出。没有「应该能过」「大概跑过」这种话。
-> 平台 B（Windows 11 / Python 3.14.6）本轮**没有**跑 rc7 全量测试，凡涉及平台差异的结论都标了来源平台。
+> 平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）**跑过 rc7 全量 294 项全绿**（`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0）。收尾时在 Linux 上补的第 295 项（真·独立进程持租约）**未在 Windows 重跑**，见 §5 U9。凡涉及平台差异的结论下面都标了来源平台。
 > 唯一数据源是 `docs/.rc7-facts.md`；凡是那份清单里没有的，这里也不写。
 
 ## 0. 状态表
@@ -14,10 +14,10 @@
 | 对比基线 | `v0.1.1-rc6`（发布点 commit `a2e9275751`） |
 | 基线前最后一个提交 | `c0c54bc`（docs: README 新增第 0 节，把唯一下载渠道指向 GitHub Release v0.1.1-rc6） |
 | 本批改动规模 | 14 个已跟踪文件 `+598 / -271`，另有 3 个未跟踪新增文件 |
-| 测试数 | 294 项（18 个测试文件），本轮 `Ran 294 tests ... OK`，RC=0 |
+| 测试数 | 295 项（18 个测试文件），本轮 `Ran 295 tests ... OK`，RC=0 |
 | 源码规模 | `bigfish/` 15 个文件共 6462 行 |
 | 平台 A（已实测） | Debian 12 / Python 3.11.2 / SQLite 3.40.1 |
-| 平台 B（未实测 rc7） | Windows 11 / Python 3.14.6 |
+| 平台 B（rc7 已实测） | Windows 11 / Python 3.14.6 / SQLite 3.50.4 |
 | `SCHEMA_VERSION` | 4（未变） |
 | `BACKUP_FORMAT_VERSION` | 4（未变） |
 | 定性 | 加固版：修 8 条审计项 + 加一个只读角色，**不动库结构** |
@@ -155,9 +155,9 @@ bigfish/
 
 | 文件 | 作用 | 备注 |
 | --- | --- | --- |
-| `requirements.lock` | 全传递依赖精确 pin，用于复现同一套依赖 | 头注释已同步为「重跑全量测试（294 项）」 |
+| `requirements.lock` | 全传递依赖精确 pin，用于复现同一套依赖 | 头注释已同步为「重跑全量测试（295 项）」 |
 | `.github/workflows/ci.yml` | 双平台 × 双 Python 的 CI，外加密钥扫描 job | 只在仓库里，本地不执行；第一次真正跑要等推到远端 |
-| `tests/test_v011_rc7.py` | rc7 的 27 项回归测试 | 7 个测试类，见 4.2 |
+| `tests/test_v011_rc7.py` | rc7 的 28 项回归测试 | 7 个测试类，见 4.2 |
 
 `requirements.txt` 保留不动——它和 lock 是两个用途，删掉它会破坏 `tools/dev_setup.sh` 与 `setup.ps1` 的既有路径。
 
@@ -223,12 +223,12 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 ## 4. 验证结果
 
-### 4.1 全量单测：294 项 OK
+### 4.1 全量单测：295 项 OK
 
 ```text
 $ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
       .venv/bin/python -m unittest discover -s tests -t .
-Ran 294 tests in 59.793s
+Ran 295 tests in 60.507s
 
 OK
 RC=0
@@ -248,14 +248,14 @@ RC=0
 | `test_v011_p3` | 20 | | `test_v011_rc5_restore_authority` | 24 |
 | `test_v011_rc3` | 26 | | `test_v011_rc5_review_audit` | 13 |
 | `test_v011_rc4` | 33 | | `test_v011_rc6` | 16 |
-| | | | `test_v011_rc7` | 27 |
-| | | | **合计** | **294** |
+| | | | `test_v011_rc7` | 28 |
+| | | | **合计** | **295** |
 
-### 4.2 rc7 新增的 27 项
+### 4.2 rc7 新增的 28 项
 
 | 测试类 | 项数 | 覆盖什么 |
 | --- | --- | --- |
-| `TestLeaseAtomicity` | 5 | 有写者时恢复被拒；有恢复时写者开不了库；同进程第二个 `Database` 不死锁；全关之后排他锁能拿到；锁文件用完不删 |
+| `TestLeaseAtomicity` | 6 | 有写者时恢复被拒；有恢复时写者开不了库；同进程第二个 `Database` 不死锁；全关之后排他锁能拿到；锁文件用完不删；**subprocess 起真独立进程持租约时恢复被拒** |
 | `TestMcpFieldLimit` | 4 | 5 个自由文本字段都声明了上限；超限心跳报错；刚好卡在上限能过；超限提交报错且什么都没写进去 |
 | `TestBindGate` | 5 | 生产工厂拒公网 host、收回环；中间件挡非回环客户端、放行回环；`TRUSTED_PEERS` 只有两个进程内常量 |
 | `TestManifestCredentialStatus` | 3 | 操作包说 hashes-only；审计包不承诺「已干净」；状态值只从已知集合里取 |
@@ -280,7 +280,7 @@ pyflakes 从「有输出」变成「零输出」，靠的就是 1.10 那条重�
 
 | 项目 | 现状 |
 | --- | --- |
-| 平台 B 跑 rc7 的 294 项 | **没跑**。Windows 11 / Python 3.14.6 上只跑到 rc6 |
+| 平台 B 跑 rc7 的 294 项 | **已跑通**。`Ran 294 tests in 74.232s` / `OK (skipped=1)` / 退出码 0。对应 294 项那一版；第 295 项未在 Windows 重跑 |
 | Windows 真机 GUI 窗口 | **没验**（一直用 offscreen 冒烟） |
 | CI 工作流实际执行 | **没跑过**。`ci.yml` 只是仓库里的文件，第一次真跑要等推到远端 |
 | mobile 端到端 | **没有**。只有角色与权限矩阵，服务端点和客户端都不存在 |
@@ -296,7 +296,8 @@ pyflakes 从「有输出」变成「零输出」，靠的就是 1.10 那条重�
 | U2 | exe 打包（PyInstaller） | 用户仍要装 Python 才能跑 | 依赖 BFC-07 的锁文件先稳定 |
 | U3 | 开机自启注册 | 现在要手动 `start-gui.ps1` / `start-headless.ps1` | 需要管理员权限，见 §6.1 |
 | U4 | 跨设备 MCP 闭环的 rc7 重跑 | 上一次通过是 rc2 时期的 11/11，rc7 改了 server 的工厂与中间件，可能影响通道 | 需要两台机器与 Tailscale |
-| U5 | 平台 B 跑 rc7 的 294 项 | Windows 上 rc7 的结论全靠平台 A 外推 | 需要 Windows 11 + Python 3.14.6 环境 |
+| U5 | 平台 B 跑 rc7 的 294 项 | **已完成**（2026-11-23）：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0 | 用独立目录与独立数据目录跑，未碰现役实例 |
+| U9 | 平台 B 复跑 295 项（含跨进程租约用例） | **未做**。Linux 已 `Ran 295 tests in 60.507s / OK`；Windows 仍是 294 项的结果 | 收尾时那台机正被人用着（`ControlStatus` 持续 `state=user`），没硬抢控制权 |
 | U6 | 移动端 REST / SSE 端点 | 只有角色，没有接口。3099 / 3100 仍是「计划中，未实现」 | 见 `docs/ARCHITECTURE-FUTURE.md` 草案 |
 | U7 | apk 打包 | 没有客户端可打 | 依赖 U6 |
 | U8 | `core.py`、`server.py` 分层重构 | `core.py` 1379 行、`server.py` 620 行，改一处要读一整遍 | 没排期，纯技术债 |
@@ -342,7 +343,7 @@ U5 是这八条里最该先补的：台上只有一条腿站着，另一条腿�
 
 按「补证据 → 补能力 → 还技术债」排：
 
-1. **先补 U5**：在 Windows 11 / Python 3.14.6 上把那 294 项跑通。这是唯一一条能靠一个人一台机器关掉的证据缺口，关掉之后 rc7 才算双平台成立。
+1. ~~先补 U5：在 Windows 11 / Python 3.14.6 上把那 294 项跑通。~~ **已完成（2026-11-23）**：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0。rc7 现在双平台成立。
 2. **再补 U1**：真机开一次窗口，看缩放、DPI、托盘。offscreen 冒烟只能证明「不崩」，证明不了「能用」。
 3. **把 CI 真跑一次**：`ci.yml` 现在是仓库里的文件，不是证据。推到远端跑通第一个绿灯，BFC-07 才能从「部分完成」变「完成」。
 4. **BFC-08 在下次发版时验证**：打一个带注释 tag，`git cat-file -p` 看 `parents` 不为 0、`git merge-base` 能和 main 连上。这条只能靠流程，没有测试能兜。

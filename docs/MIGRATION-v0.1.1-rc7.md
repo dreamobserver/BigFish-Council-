@@ -7,8 +7,8 @@
 | 库结构变化 | **无**。`SCHEMA_VERSION` 仍是 4，`BACKUP_FORMAT_VERSION` 仍是 4 |
 | 是否需要人工介入 | 不需要跑迁移脚本；只有「想用 mobile 角色」时需要手工建一次身份 |
 | 能否直接降级 | 能。库结构没动，rc6 可以原样打开 rc7 写过的库（例外见 ROLLBACK 文档的 mobile 段） |
-| 已验证平台 | Debian 12 / Python 3.11.2 / SQLite 3.40.1（294 项 OK） |
-| 未验证平台 | Windows 11 / Python 3.14.6（rc7 的 294 项没跑） |
+| 已验证平台 | Debian 12 / Python 3.11.2 / SQLite 3.40.1（295 项 OK） |
+| 已验证平台 | Windows 11 / Python 3.14.6 / SQLite 3.50.4（rc7 的 294 项全绿：`Ran 294 tests in 74.232s` / `OK (skipped=1)`；收尾补的第 295 项未在 Windows 重跑） |
 
 ## 1. 结论：这次不需要迁移数据库
 
@@ -65,7 +65,7 @@ rc7 之前项目只有 `requirements.txt`，里面是声明式范围（`fastapi>
 | --- | --- |
 | PySide6 | lock 里是一个具体版本号，Windows 上装的是同一版本号的 `cp310-abi3` wheel，头注释里写了「已实测」 |
 | Python 版本 | lock 是在 3.11.2 上 freeze 的。3.13 上部分包可能没有对应 wheel，CI 的 3.13 那一格因此装的是 `requirements.txt` 而不是 lock |
-| 头注释 | lock 的头注释已同步为「重跑全量测试（294 项）」，与 rc7 实际数一致（早期一版写的是 265，已在发布前修正） |
+| 头注释 | lock 的头注释已同步为「重跑全量测试（295 项）」，与 rc7 实际数一致（早期一版写的是 265，已在发布前修正） |
 
 ---
 
@@ -176,7 +176,7 @@ rc6 → rc7 实际要做的只有「换代码 + 装依赖 + 重开服务」。
 | 4. 换代码 | 切到 rc7 的 `bigfish/` | `bigfish/__init__.py` 里是 `0.1.1-rc7` |
 | 5. 装依赖 | `pip install -r requirements.txt`（或 `-r requirements.lock`） | 无报错 |
 | 6. 起服务 | `start-gui.ps1` 或 headless | 3096 能连，且只听 127.0.0.1 |
-| 7. 跑测试 | `python -m unittest discover -s tests -t .` | 294 项 OK |
+| 7. 跑测试 | `python -m unittest discover -s tests -t .` | 295 项 OK |
 | 8. 自检 | `python tools/selfcheck.py` | 16 通过 0 失败 |
 | 9. （可选）建 mobile | `register_executor(role="mobile")` | 见 §3.3 |
 
@@ -205,7 +205,7 @@ rc6 → rc7 实际要做的只有「换代码 + 装依赖 + 重开服务」。
 | --- | --- | --- |
 | 1 | `SCHEMA_VERSION` | 仍是 4 |
 | 2 | `PRAGMA integrity_check` | `ok` |
-| 3 | 全量测试 | 294 项 OK |
+| 3 | 全量测试 | 295 项 OK |
 | 4 | 自检 | 16 通过 0 失败 |
 | 5 | 监听地址 | 3096 只听 127.0.0.1，`allowed-ports` 打出 implemented 与 reserved 两段 |
 
@@ -252,12 +252,12 @@ con.close()
 | 场景 | 做法 | 结果 |
 | --- | --- | --- |
 | rc6 库用 rc7 打开 | 直接 `Database(路径)` | 不触发迁移，`init_schema` 走 `current == SCHEMA_VERSION` 分支 |
-| 全量单测 | `unittest discover -s tests` | `Ran 294 tests ... OK`，RC=0 |
+| 全量单测 | `unittest discover -s tests` | `Ran 295 tests ... OK`，RC=0 |
 | 旧备份恢复 | `restore_bundle` 在 staging 上 `init_schema()` | 旧版本在 staging 内被迁移，再整体替换 |
 | 审计包误用于恢复 | `restore_bundle(审计包)` | 抛 `RestoreError("这是脱敏审计包，不能用于恢复运行数据库")` |
 | 高版本备份往低版本恢复 | 构造 `schema_version > 4` 的包 | `_verify_version` 拦住，提示先升级程序 |
 
-注意第一行：**这是本轮 294 项里覆盖到的路径**，不是在一台真实生产机上跑过的。生产机的首次升级仍建议按 §6 走一遍。
+注意第一行：**这是本轮 295 项里覆盖到的路径**，不是在一台真实生产机上跑过的。生产机的首次升级仍建议按 §6 走一遍。
 
 ---
 

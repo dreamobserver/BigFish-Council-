@@ -6,13 +6,13 @@
 | 日期 | 2026-11-23（工作树写文档日；`CHANGELOG.md` 的 rc7 段标题写的是 2026-11-20，两处不同源，以文件 mtime 为准） |
 | 相对基线 | rc6 的工作树，HEAD `c0c54bc`（`docs: README 新增第 0 节——唯一下载渠道指向 GitHub Release v0.1.1-rc6`）。rc6 的**发布点**是 tag `v0.1.1-rc6` → commit `a2e9275751`，也就是 BFC-08 说的那个 `parents=0` 根提交 |
 | 审计来源 | `docs/AUDIT-CODEX-v0.1.1-rc6.md`（Codex / GPT 在 `main` 上提交，commit `f5e955930c`），BFC-01～BFC-08 共八条。**该文件在本仓库工作树内没有副本**（`ls docs/AUDIT*` 为空），本文只能引用文件名与 commit，不能引用它的行号 |
-| 分支 / HEAD | `fix/v0.1.1-rc7-hardening` / `c0c54bc`，**本轮全部改动未提交**（git commit 被明确禁止） |
+| 分支 / HEAD | `fix/v0.1.1-rc7-hardening`，基线 `c0c54bc`；本轮改动已提交（提交号用 `git log -1 --format=%h` 取） |
 | 差异规模 | 实测 `14 files changed, 609 insertions(+), 275 deletions(-)`（见补充说明一：任务书与事实清单记的是 +598/−271，差 +11/−4）。其中代码侧 `bigfish/`+`tests/` 11 文件 `417/208`；另新增 4 个未跟踪项（`requirements.lock`、`.github/workflows/ci.yml`、`tests/test_v011_rc7.py`、`docs/.rc7-facts.md`） |
 | 库结构 | `SCHEMA_VERSION = 4`、`BACKUP_FORMAT_VERSION = 4`，**rc7 未改**，没有新增 `MIGRATIONS` 项，rc6 的库直接能用，不需要迁移也不需要回滚 |
-| 全量测试 | `Ran 294 tests in 59.793s` / `OK` / RC=0（Debian 12 / Python 3.11.2 / SQLite 3.40.1 / offscreen） |
+| 全量测试 | `Ran 295 tests in 60.507s` / `OK` / RC=0（Debian 12 / Python 3.11.2 / SQLite 3.40.1 / offscreen） |
 | 自检与冒烟 | `tools/selfcheck.py` 通过 16 项、失败 0 项；`tools/gui_smoke.py` 通过 9 项、失败 0 项 |
 | 静态检查 | `pyflakes` `PF_RC=0` 零输出；`compileall -q` `CC_RC=0` |
-| 平台 | 平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）已跑 294 项全绿；平台 B（Windows 11 / Python 3.14.6）**rc7 的 294 项未跑**，仍是 U5 |
+| 平台 | 平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）**295 项全绿**；平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）**294 项全绿**（`Ran 294 tests in 74.232s` / `OK (skipped=1)` / 退出码 0）。平台 B 的口径停在 294 项：收尾补的第 295 项（真·独立进程持租约）只在 Linux 上跑过，见第十节 U9 |
 
 状态口径：
 
@@ -154,7 +154,7 @@ rc6 只给 `restore` 分支补了 `finally: db.close()`，理由是「其他分�
 
 ### BFC-07：把「我这台机器绿」变成「谁都能复现、每次提交都有人跑」
 
-没有 lockfile 意味着「我这边 294 项全绿」不能复现到别人机器：`requirements.txt` 是范围声明，传递依赖会漂，而本轮改动恰好包括并发与文件锁——这类东西对依赖版本比业务代码更敏感。CI 意味着「每次提交都有人跑一遍」这件事之前完全依赖人肉，靠自觉。
+没有 lockfile 意味着「我这边 295 项全绿」不能复现到别人机器：`requirements.txt` 是范围声明，传递依赖会漂，而本轮改动恰好包括并发与文件锁——这类东西对依赖版本比业务代码更敏感。CI 意味着「每次提交都有人跑一遍」这件事之前完全依赖人肉，靠自觉。
 
 rc7 补的是最小闭环，不是完备发布工程：`requirements.lock` 39 个精确 pin（来自 rc7 验证过的 venv，生成命令写在文件头）+ `.github/workflows/ci.yml` 的 ubuntu/windows × 3.11/3.13 四格矩阵，跑 pyflakes / compileall / 单测 / selfcheck / gui_smoke。
 
@@ -209,7 +209,7 @@ tag 指向 `parents=0` 的根提交，意味着这个 tag 的祖先链里没有 
 | `bigfish/core.py` | MOBILE | `:160-164` 白名单改 `R.DB_ROLES`、`:173-174` `bfc_mb_` 前缀 |
 | `bigfish/gui.py` | BFC-03、S1 | `:22-26` 删未使用导入、`:96-113` 改用 `create_production_app` 并把 thread 判断提前 |
 | `bigfish/__init__.py` | 版本号 | `:6` `__version__ = "0.1.1-rc7"` |
-| `tests/test_v011_rc7.py` | 全部八条 + MOBILE（新增，377 行） | 7 类 27 项，见第五节 |
+| `tests/test_v011_rc7.py` | 全部八条 + MOBILE（新增，438 行） | 7 类 28 项，见第五节 |
 | `tests/test_v011_p2.py` | MOBILE | `:43` 去掉硬编码 4、`:55` 新增「不能执行」、`:67` 新增「不兜底成执行器」 |
 | `tests/test_v011_rc4.py` | MOBILE | `:465` 从「mobile 不该在 DB_ROLES」改成「在、但映射到只读且无 task.claim」 |
 | `tests/test_v011_rc5_review_audit.py` | BFC-04 | `:231-233` 断言枚举值 + 断言布尔 key 已消失 |
@@ -220,17 +220,17 @@ tag 指向 `parents=0` 的根提交，意味着这个 tag 的祖先链里没有 
 
 ## 五、用例分布与增量
 
-本轮实测 `grep -c 'def test_'` 计数（共 294 项）：
+本轮实测 `grep -cE '^\s+def test_'` 计数（共 295 项）：
 
-`test_api` 6、`test_core` 15、`test_v011_p0` 16、`test_v011_p1` 24、`test_v011_p2` 26、`test_v011_p3` 20、`test_v011_rc3` 26、`test_v011_rc4` 33、`test_v011_rc5_cli_guard` 4、`test_v011_rc5_dispatch_id` 3、`test_v011_rc5_key_heal` 8、`test_v011_rc5_proxy` 9、`test_v011_rc5_receipts` 24、`test_v011_rc5_restore_authority` 24、`test_v011_rc5_review_audit` 13、`test_v011_rc6` 16、`test_v011_rc7` 27。
+`test_api` 6、`test_core` 15、`test_v011_p0` 16、`test_v011_p1` 24、`test_v011_p2` 26、`test_v011_p3` 20、`test_v011_rc3` 26、`test_v011_rc4` 33、`test_v011_rc5_cli_guard` 4、`test_v011_rc5_dispatch_id` 3、`test_v011_rc5_key_heal` 8、`test_v011_rc5_proxy` 9、`test_v011_rc5_receipts` 24、`test_v011_rc5_restore_authority` 24、`test_v011_rc5_review_audit` 13、`test_v011_rc6` 16、`test_v011_rc7` 28。
 
-265 → 294 的 +29 项拆开：
+265 → 295 的 +30 项拆开：
 
 | 来源 | 项数 | 对应条目 |
 | --- | --- | --- |
-| `tests/test_v011_rc7.py`（新文件，7 类） | 27 | 租约原子性 5（BFC-01）、MCP 字段上限 4（BFC-02）、监听闸门 5（BFC-03）、manifest 枚举 3（BFC-04）、CLI 关库与端口 2（BFC-05/06）、发布工程 3（BFC-07）、手机角色 5（MOBILE） |
+| `tests/test_v011_rc7.py`（新文件，7 类） | 28 | 租约原子性 6（BFC-01，含 1 项 subprocess 真独立进程）、MCP 字段上限 4（BFC-02）、监听闸门 5（BFC-03）、manifest 枚举 3（BFC-04）、CLI 关库与端口 2（BFC-05/06）、发布工程 3（BFC-07）、手机角色 5（MOBILE） |
 | `tests/test_v011_p2.py` | +2 | 「手机端不能执行」「不兜底成执行器」（MOBILE），同时把原 `test_four_canonical_roles` 改名并去掉硬编码 4（改名不增减项数） |
-| 合计 | **+29** | 265 → 294 |
+| 合计 | **+30** | 265 → 295 |
 
 BFC-08 没有对应用例（改的是发布流程，不是行为），所以九条里八条有测试、一条靠人工。Note：版本对比口径是 rc6 的 265 项（见 `FIX-MATRIX-v0.1.1-rc6.md` 第五节）。
 
@@ -244,7 +244,8 @@ BFC-08 没有对应用例（改的是发布流程，不是行为），所以九�
 | U2 | exe 产物（PyInstaller） | 未做 | BFC-07 只补了 lockfile 与 CI，没有可分发的 exe；「双击就能用」这条承诺仍未兑现 | 先用 PyInstaller 出单文件包，再在干净的 Windows 上验证 `PySide6` 插件与证书加载 |
 | U3 | 开机自启注册 | 未做 | 需要常驻的组件（watchdog）目前要手动启动，重启机器后不会自己回来 | 注册表 `Run` 键或计划任务，做幂等写入 + 卸载清理 |
 | U4 | 跨设备 MCP 闭环 rc7 重跑 | 未做（rc2 时期 11/11 通过） | BFC-02 改的是 MCP 校验路径，未在 Tailscale 两侧真机之间重跑 claim → heartbeat → submit 全链路 | 两侧真机重跑 11 项，并专门验一次「超长字段被拒」在真实网络下的表现 |
-| U5 | 平台 B 跑 rc7 的 294 项 | 未做 | 本轮 BFC-01 的重写正好落在 Windows 分支（槽位模型 + `_LOCAL`），而这条分支**没有任何真机记录**。rc6 已经证明过这类路径只靠 Linux 不可能验出来（缺陷 17 就是这么暴露的） | 在 Windows 11 / Python 3.14.6 上跑全量 294 项，先看 5 项 `TestLeaseAtomicity` 与 `_acquire_windows` 槽位寻址 |
+| U5 | 平台 B 跑 rc7 的 294 项 | **已做（2026-11-23）**：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0。BFC-01 落在 Windows 分支的 5 项 `TestLeaseAtomicity` 全部通过 | — |
+| U9 | 平台 B 复跑 295 项 | **未做** | 「两个真正独立的进程同时恢复」这条已在 Linux 补了用例（`test_real_second_process_blocks_restore`，subprocess 起独立进程）；Windows 侧还没跑过，`msvcrt` 按句柄记锁的语义只在平台 B 才需担心 |
 | U6 | 移动端 REST/SSE 端点 | 未做 | MOBILE 只落地了「角色 + 鉴权 + 注册 + 映射」，手机端真正要调的接口一个都没有；`docs/ARCHITECTURE-FUTURE.md` 里只有草案 | 先定只读端点集（任务列表、事件流、留言），再定 3099/3100 的鉴权模型 |
 | U7 | apk 打包 | 未做 | 没有分发形态 | 依赖 U6 先有端点，再选壳（WebView 或原生） |
 | U8 | `core.py`/`server.py` 分层重构 | 未做 | `core.py` 1379 行、`server.py` 620 行，职责已经明显混在一起（`server.py` 里既有 ASGI 组装、中间件、还有 `tool_specs` 与业务分发） | 先切出 MCP 层，再切出传输层；本轮只在 `server.py` 里加东西，没有动结构 |
@@ -258,7 +259,7 @@ BFC-08 没有对应用例（改的是发布流程，不是行为），所以九�
 ```bash
 cd /home/dsh/bigfish-council
 
-# 全量 294 项
+# 全量 295 项
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
 
@@ -274,7 +275,7 @@ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
 
 按审计项定位测试：
 
-- BFC-01 → `tests/test_v011_rc7.py::TestLeaseAtomicity`（5 项）
+- BFC-01 → `tests/test_v011_rc7.py::TestLeaseAtomicity`（6 项）
 - BFC-02 → `tests/test_v011_rc7.py::TestMcpFieldLimit`（4 项）
 - BFC-03 → `tests/test_v011_rc7.py::TestBindGate`（5 项）
 - BFC-04 → `tests/test_v011_rc7.py::TestManifestCredentialStatus`（3 项）+ `tests/test_v011_rc5_review_audit.py::test_manifest_declares_allowlist_policy`

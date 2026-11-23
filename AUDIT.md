@@ -50,9 +50,9 @@
 | 数据库 schema | v4（`bigfish/db.py:24 SCHEMA_VERSION = 4`、`:25 BACKUP_FORMAT_VERSION = 4`） |
 | rc6 → rc7 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4，没有新增 `MIGRATIONS` 项，rc6 的库直接能用，不需要迁移也不需要回滚 |
 | rc5 → rc6 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc5 的库直接能用，不需要迁移，也不需要回滚（rc4 → rc5 那次加的 `executors.disabled_reason` 列 + `idx_executors_enabled` 索引、以及 BACKUP_FORMAT_VERSION 3 → 4 都已是历史） |
-| 测试总数 | **294** 项 |
-| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **294 项全绿**（`Ran 294 tests in 59.793s`） |
-| 平台 B | Windows 11 / Python 3.13.11 / SQLite 3.50.4 → rc6 的 **265 项全绿**；**rc7 的 294 项尚未在平台 B 重跑**（见第 5 节 U5）（`Ran 265 tests in 59.975s`，`OK (skipped=1)`，退出码 0）。**但首跑是 `FAILED (errors=2)`**，两条 ERROR 引出两个 Windows 专属真缺陷（msvcrt 按句柄锁、CLI restore 不关库），修完提交 `73104a8` 才全绿——见第 5 节 U5 与第 7 节 Q9 |
+| 测试总数 | **295** 项 |
+| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **295 项全绿**（`Ran 295 tests in 60.507s`） |
+| 平台 B | Windows 11 / Python 3.14.6 / SQLite 3.50.4 → **294 项全绿**（`Ran 294 tests in 74.232s`，`OK (skipped=1)`，退出码 0；唯一跳过的是 Windows 无 SIGINT 语义的 `test_graceful_shutdown_on_sigint`）。**这是 294 项那一版的结果**；收尾时新增的第 295 项（真·独立进程持租约）**未在 Windows 重跑**，见 §5 U9。rc6 那次 265 项也是全绿（`Ran 265 tests in 59.975s`），但**首跑是 `FAILED (errors=2)`**，两条 ERROR 引出两个 Windows 专属真缺陷（msvcrt 按句柄锁、CLI restore 不关库），修完提交 `73104a8` 才全绿——见第 7 节 Q9 |
 | 主语言 | Python 3（标准库 + FastAPI + PySide6） |
 | 许可证 | MIT |
 
@@ -76,7 +76,7 @@
 | `tests/test_v011_rc5_cli_guard.py` | 4 | CLI 恢复探端口拒绝、`--force` 绕过、端口探测助手（含 rc6 加的「探端口早于开库」） |
 | `tests/test_v011_rc5_dispatch_id.py` | 3 | claim 下发 `dispatch_id`、重放同号、重新派工换号 |
 | `tests/test_v011_rc6.py` | 16 | 跨进程恢复租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
-| `tests/test_v011_rc7.py` | 27 | Codex 审计 BFC-01~08 各组 + 手机端只读角色（租约原子性 5 / MCP 字段上限 4 / 监听闸门 5 / manifest 枚举 3 / CLI 关库与端口 2 / 发布工程 3 / 手机角色 5） |
+| `tests/test_v011_rc7.py` | 28 | Codex 审计 BFC-01~08 各组 + 手机端只读角色（租约原子性 6 / MCP 字段上限 4 / 监听闸门 5 / manifest 枚举 3 / CLI 关库与端口 2 / 发布工程 3 / 手机角色 5） |
 
 v0.1.0 的原始 21 项（`test_core.py` + `test_api.py`）**一项没删、一项没放宽断言**。
 rc3 的 26 项、rc4 的 33 项、rc5 的 80 项、rc6 的 21 项都是新增，不是替换。
@@ -84,7 +84,7 @@ rc5 新增 7 个文件共 **80 项**（21 + 24 + 13 + 9 + 7 + 3 + 3），
 另有 2 项加在两个既有文件里（`test_v011_p0.py` 15 → 16、`test_v011_p3.py` 19 → 20），
 合计 162 → **244**。
 
-rc7 在这 265 之上又加了 **29 项 → 294**：新增 `tests/test_v011_rc7.py` **27 项**（八条审计意见逐条对应 + 手机端角色 5 项），
+rc7 在这 265 之上又加了 **30 项 → 295**：新增 `tests/test_v011_rc7.py` **28 项**（八条审计意见逐条对应 + 手机端角色 5 项 + 1 项跨进程租约），
 另有 2 项补进 `tests/test_v011_p2.py`（手机角色不能执行、db_role 映射不兜底成执行器）。
 **一项没删、一项没放宽断言。**
 
@@ -201,7 +201,7 @@ docs/                交付、测试、安全、网络、迁移、回滚、架�
 # Debian 12 / Python 3.11.2 / SQLite 3.40.1
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
-# rc7 → Ran 294 tests in 59.793s / OK / exit 0
+# rc7 → Ran 295 tests in 60.507s / OK / exit 0
 # rc6 当时 → Ran 265 tests in 41.728s / OK / exit 0
 # 复核：本次改写文件时又跑了一遍，265 项同样 OK（耗时 55.093s，仅机器负载不同）
 ```
@@ -215,7 +215,7 @@ $env:QT_QPA_PLATFORM = "offscreen"   # 必须；不要设 LD_LIBRARY_PATH
 
 # rc6 实测（修完两个 Windows 专属缺陷之后）：
 #   Ran 265 tests in 59.975s / OK (skipped=1) / UT_RC=0
-# rc7 的 294 项尚未在平台 B 重跑，见第 5 节 U5
+# rc7 实测：Ran 294 tests in 74.232s / OK (skipped=1) / UT_RC=0
 # 首次跑是 FAILED (errors=2, skipped=1)，见第 5 节 U5 与第 7 节 Q9
 ```
 
@@ -228,7 +228,7 @@ $env:QT_QPA_PLATFORM = "offscreen"   # 必须；不要设 LD_LIBRARY_PATH
 | `tools/e2e_loopback.py` | 22/22 | **同机回环**演练（明确声明不是跨设备） |
 | `tools/net_check.py` | 分层 | 第 1–3 层本地；第 4 层跨机需真实对端 |
 | `tools/remote_check.py` | 默认只读 | 真实 MCP JSON-RPC；必须显式 `--task-id` 才碰数据 |
-| `pyflakes bigfish tools tests` | 无输出 | 平台 A 通过；**平台 B 未装 pyflakes，未做** |
+| `pyflakes bigfish tools tests` | 无输出 | 两平台都通过（平台 B 装的是 pyflakes 4.1.0） |
 | `compileall bigfish tools tests` | exit 0 | 两平台都可编 |
 
 ### 4.4 跨设备链路
@@ -247,8 +247,9 @@ VPS → Windows 客户端 `CLIENT-B-TAILNET-IP:3096`（Tailscale Serve，仅 tai
 | U2 | 开机自启 | 未注册；`tools/start-headless.ps1` 真机未跑通（`schtasks /TR` 嵌套引号报 `-2147467259`） | WMI 起的进程重启即消失 |
 | U3 | DSH MCP 连接导入 | 未导入（需人类授权） | 现在 DSH 尚未接上这个控制台 |
 | U4 | rc3 / rc4 / rc5 / rc6 跨机闭环 | 未重跑 | 跨机证据仍是 rc2 时期的 |
-| U5 | 平台 B 的 rc7 294 项 | **未跑**：平台 B 至今只跑过 rc6 的 265 项（`Ran 265 tests in 59.975s / OK (skipped=1)`，退出码 0，那次修了两个 Windows 专属真缺陷，见第 7 节 Q9） | rc7 新增的 `test_v011_rc7.py` 里 "锁文件永不删除" 与 Windows 槽位分支语义与 POSIX 不同，必须真机确认才能说平台 B 通过 |
-| U6 | 平台 B 静态检查 | `compileall` 已跑（退出码 0）；**pyflakes 未装，未做** | Windows 侧的类型/名字类检查只有 `compileall` 一份证据 |
+| U5 | 平台 B 的 rc7 294 项 | **已跑通**：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0（Windows 11 / Python 3.14.6 / SQLite 3.50.4）。当时 `test_v011_rc7.py` 27 项全过，包括 `TestLeaseAtomicity` 的 5 项（锁文件永不删除、独占拒写者、同进程第二实例不互锁、释放后独占可拿、写者存活时独占被拒） | 用独立目录 `bigfish-council-rc7` + 独立数据目录跑，不碰现役 rc2 实例 |
+| U9 | 平台 B 复跑 295 项（含新加的跨进程租约用例） | **未做**。Linux 已跑 `Ran 295 tests in 60.507s / OK`；Windows 仍是 294 项那份结果 | 收尾时那台机正被人用着（`ControlStatus` 持续 `state=user`），拿不到控制权，不硬抢 |
+| U6 | 平台 B 静态检查 | **已补齐**：`pyflakes bigfish tools tests` 零输出（退出码 0，pyflakes 4.1.0）、`compileall -q` 退出码 0 | Windows 侧的名字类检查与平台 A 同口径 |
 | U7 | 类型检查（mypy / pyright） | 未接 | 只有 `compileall` 与 `pyflakes` 两道 |
 | U8 | 长时运行（soak） | 未做 24h 连续跑 | 长期泄漏、票过期满 6 小时后行为未验 |
 | U9 | 恢复期维护模式的跨进程行为 | 单进程内已测（`MaintenanceError` / 503 / `/health`）；跨进程 rc6 起有 `WriterLease` 租约（POSIX 6 项单测已过），CLI 端口探测仍在 | 端口探测与真正替换之间的 TOCTOU 窗口被租约收窄了，但 `--force` 仍跳过端口探测，见第 6 节 X1、U11 |
@@ -723,12 +724,12 @@ Q1 ... Q8
 | v0.1.1-rc3 | 状态机取消语义、恢复原子性、幂等并发、监听地址、凭据脱敏 | 129 |
 | v0.1.1-rc4 | 运行时所有权、库版本识别、恢复成对原子、审查绑定、多轮执行票、MCP 协议、端口预留 | 162 |
 | v0.1.1-rc5 | 恢复后授权作废（R1）、事件落库（R2）、撤评论边界（R3）、锁内时间戳（R4）、执行收据（R5）、审计白名单（R6）、跳板硬闸门（R7）、恢复期排空（R8）、密钥自愈（R9）；schema 3 → 4 | **244** |
-| **v0.1.1-rc7** | Codex 审计 BFC-01～BFC-08 收口：`locks.py` 重写成单一内核对象（BFC-01）、MCP 字段级 `maxLength`（BFC-02）、`create_production_app` + 连接级回环闸门（BFC-03）、manifest 改 `credential_status` 枚举（BFC-04）、CLI 全分支关库（BFC-05）、`allowed-ports` 打预留端口（BFC-06）、`requirements.lock` + CI（BFC-07）、真实提交上打 tag（BFC-08）；另加手机端只读角色 `MOBILE_VIEWER`。**schema 未变，仍 v4** | **294** |
+| **v0.1.1-rc7** | Codex 审计 BFC-01～BFC-08 收口：`locks.py` 重写成单一内核对象（BFC-01）、MCP 字段级 `maxLength`（BFC-02）、`create_production_app` + 连接级回环闸门（BFC-03）、manifest 改 `credential_status` 枚举（BFC-04）、CLI 全分支关库（BFC-05）、`allowed-ports` 打预留端口（BFC-06）、`requirements.lock` + CI（BFC-07）、真实提交上打 tag（BFC-08）；另加手机端只读角色 `MOBILE_VIEWER`。**schema 未变，仍 v4** | **295** |
 | **v0.1.1-rc6** | Astra 审计 F-01～F-09 收口：维护模式 guard/锁原子化（F-01）、`restore_epoch` 读取修复（F-02）、密钥自愈失败拒绝启动（F-03）、CLI 端口预检前移（F-04）、GUI 停服确认（F-05）、跨进程恢复租约 `locks.py`（F-06）、审计包凭据声明诚实化（F-07）、`create_app` 边界写明（F-08）、请求体上限（F-09）；**schema 未变，仍 v4** | **265** |
 
 详见 `CHANGELOG.md`（v0.1.1-rc6 段有逐条记录）、`docs/SECURITY-REVIEW-v0.1.1-rc5.md`、
 `docs/FIX-MATRIX-v0.1.1-rc4.md`、`docs/DIFF-SUMMARY-v0.1.1-rc4.md`。
-rc7 的证据在 `CHANGELOG.md` 的 rc7 段、`tests/test_v011_rc7.py`（27 项）与本文件第 7 节 Q3/Q9.2/Q10。
+rc7 的证据在 `CHANGELOG.md` 的 rc7 段、`tests/test_v011_rc7.py`（28 项）与本文件第 7 节 Q3/Q9.2/Q10。
 rc6 也没有单独的 `docs/` 专档，证据散在 `CHANGELOG.md`、`tests/test_v011_rc6.py` 与第 4 节。
 
 ---

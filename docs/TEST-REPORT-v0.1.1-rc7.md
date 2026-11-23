@@ -8,7 +8,7 @@
 
 ## 0. 结论
 
-一句话：rc7 的 294 项单元测试在本机全绿（`Ran 294 tests in 59.793s` / `OK` / `RC=0`），27 项新增用例逐条咬住本轮 8 个审计发现（BFC-01～BFC-08）与移动端只读角色边界，静态检查与两套冒烟脚本零失败；没跑的只有平台 B 复跑、真窗口验收、跨设备闭环与打包，清单见第 7 节。
+一句话：rc7 的单元测试在平台 A 上 295 项全绿（`Ran 295 tests in 60.507s` / `OK` / `RC=0`），在平台 B 上 294 项全绿（`Ran 294 tests in 74.232s` / `OK (skipped=1)`）；收尾补的第 295 项（真·独立进程持租约）未在 Windows 重跑，见第 7 节 U9。28 项新增用例逐条咬住本轮 8 个审计发现（BFC-01～BFC-08）与移动端只读角色边界，两平台静态检查与两套冒烟脚本零失败；没跑的只有真窗口验收、跨设备闭环与打包，清单见第 7 节。
 
 ---
 
@@ -37,7 +37,7 @@ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen
 
 ### 1.3 平台 B（Windows 11 / Python 3.14.6）
 
-rc6 时平台 B 跑过 265 项。rc7 新增的 27 项（尤其租约原子性与 CLI 关库）在平台 B 上**一项都没跑**，见第 7 节 U5。第 6 节列出的平台差异是从代码与 rc6 实跑结论里读出来的，不是本轮实测。
+rc7 的 294 项在平台 B 已跑通：`Ran 294 tests in 74.232s` / `OK (skipped=1)` / 退出码 0（Windows 11 / Python 3.14.6 / SQLite 3.50.4）。唯一跳过的是 `test_graceful_shutdown_on_sigint`——Windows 没有 SIGINT 语义，标了 `skipIf(os.name == "nt")`。当时 rc7 新增的 27 项在平台 B 上全过，包括落在 Windows 专有分支（槽位模型 + `_LOCAL`）的 5 项 `TestLeaseAtomicity`。收尾时补的第 28 项（subprocess 起真独立进程）只在 Linux 上跑过，因此平台 B 的口径停在 294 项。仍有未验的：真窗口、跨设备闭环、打包。
 
 ---
 
@@ -62,7 +62,7 @@ This plugin does not support propagateSizeHints()
 ...拒绝恢复：127.0.0.1:55283 上还有服务在监听，请先停掉它（tools/stop-headless.ps1 或关闭 GUI），确认没有其他实例后再重试；确实要强行恢复请加 --force。
 .............................................................................................................................
 ----------------------------------------------------------------------
-Ran 294 tests in 61.458s
+Ran 295 tests in 60.507s
 
 OK
 RC=0
@@ -86,7 +86,7 @@ RC=0
 
 ## 3. 分组表
 
-`tests/` 下共 18 个文件：17 个 `test_*.py` 模块 + `__init__.py`（空包标记，1 行）。逐模块用例数如下，数字取自 `grep -cE '^\s+def test_'`，与 unittest 的 294 完全对得上。
+`tests/` 下共 18 个文件：17 个 `test_*.py` 模块 + `__init__.py`（空包标记，1 行）。逐模块用例数如下，数字取自 `grep -cE '^\s+def test_'`，与 unittest 的 295 完全对得上。
 
 | # | 文件 | 用例数 | 覆盖焦点 |
 |---|---|---:|---|
@@ -106,30 +106,31 @@ RC=0
 | 14 | `tests/test_v011_rc5_restore_authority.py` | 24 | 恢复授权、epoch 单调、事务原子性 |
 | 15 | `tests/test_v011_rc5_review_audit.py` | 13 | 审查语料脱敏与审计事件 |
 | 16 | `tests/test_v011_rc6.py` | 16 | 全量覆盖补齐：manifest、限流、停服、锁 |
-| 17 | `tests/test_v011_rc7.py` | 27 | 本轮 8 个审计发现 + 移动端角色 |
-| | **合计** | **294** | |
+| 17 | `tests/test_v011_rc7.py` | 28 | 本轮 8 个审计发现 + 移动端角色 + 1 项跨进程租约 |
+| | **合计** | **295** | |
 
-与 rc6 对比：rc6 是 16 个模块 265 项，rc7 是 17 个模块 294 项，净增 29 项。拆开看——新增模块 `tests/test_v011_rc7.py` 贡献 27 项；`tests/test_v011_p2.py` 贡献 2 项（`test_mobile_viewer_cannot_execute`、`test_mobile_db_role_maps_to_viewer_not_executor`），同时把硬编码 `len(R.ROLES) == 4` 的旧用例改名并放开为 `test_canonical_roles`。
+与 rc6 对比：rc6 是 16 个模块 265 项，rc7 是 17 个模块 295 项，净增 30 项。拆开看——新增模块 `tests/test_v011_rc7.py` 贡献 28 项；`tests/test_v011_p2.py` 贡献 2 项（`test_mobile_viewer_cannot_execute`、`test_mobile_db_role_maps_to_viewer_not_executor`），同时把硬编码 `len(R.ROLES) == 4` 的旧用例改名并放开为 `test_canonical_roles`。
 
-另外两个文件只补强断言不增用例：`tests/test_v011_rc4.py` +11 行、`tests/test_v011_rc5_review_audit.py` +8 行。所以 265 + 27 + 2 = 294，账是平的。
+另外两个文件只补强断言不增用例：`tests/test_v011_rc4.py` +11 行、`tests/test_v011_rc5_review_audit.py` +8 行。所以 265 + 28 + 2 = 295，账是平的。
 
 ---
 
-## 4. rc7 新增 27 项逐项说明
+## 4. rc7 新增 28 项逐项说明
 
 七个类，每个类对应一条审计发现的收敛点。每项只说一句话：它验的是哪条不变式。
 
-### 4.1 `TestLeaseAtomicity`（5 项，`tests/test_v011_rc7.py:85`）
+### 4.1 `TestLeaseAtomicity`（6 项，`tests/test_v011_rc7.py:87`）
 
 对应 BFC-01：旧实现"先扫有没有别的写者，再锁另一把锁"，两把不是同一个内核对象，扫描返回后新实例仍能在新文件上建锁，互斥失效。新实现只有一把访问锁（写者共享、恢复排他）。
 
 | 用例 | 行号 | 验的不变式 |
 |---|---:|---|
-| `test_writer_cannot_open_while_exclusive` | :93 | 恢复持排他锁期间，新 `Database` 必须抛 `LeaseError` 而不是安静打开 |
-| `test_exclusive_refused_while_writer_alive` | :118 | 有写者活着时恢复必须失败，且**被拒之后库一个字节都没变**（任务状态前后相等） |
-| `test_same_process_second_database_does_not_deadlock` | :134 | 同进程多实例共享租约不互锁：老实例还能读写、新实例也能过完整性检查 |
-| `test_lease_released_after_close_allows_exclusive` | :144 | `close()` 之后排他锁必须能立刻拿到，否则恢复永远等不到窗口 |
-| `test_lock_files_are_never_deleted` | :153 | 锁文件关闭后仍然存在——`unlink` 会让新实例在新 inode 上加锁，互斥当场失效 |
+| `test_writer_cannot_open_while_exclusive` | :95 | 恢复持排他锁期间，新 `Database` 必须抛 `LeaseError` 而不是安静打开 |
+| `test_exclusive_refused_while_writer_alive` | :120 | 有写者活着时恢复必须失败，且**被拒之后库一个字节都没变**（任务状态前后相等） |
+| `test_same_process_second_database_does_not_deadlock` | :136 | 同进程多实例共享租约不互锁：老实例还能读写、新实例也能过完整性检查 |
+| `test_lease_released_after_close_allows_exclusive` | :146 | `close()` 之后排他锁必须能立刻拿到，否则恢复永远等不到窗口 |
+| `test_lock_files_are_never_deleted` | :155 | 锁文件关闭后仍然存在——`unlink` 会让新实例在新 inode 上加锁，互斥当场失效 |
+| `test_real_second_process_blocks_restore` | :165 | 用 `subprocess` 起**真正独立的第二个进程**持写者租约，此时 `exclusive_access` 必须抛 `LeaseError`；子进程退出后必须能拿到 |
 
 ### 4.2 `TestMcpFieldLimit`（4 项，`:167`）
 
@@ -248,7 +249,7 @@ GUI 冒烟通过。
 
 | 检查 | 结果 |
 |---|---|
-| 单元测试 | 294 项 / 0 失败 / RC=0 |
+| 单元测试 | 295 项 / 0 失败 / RC=0（Linux）；Windows 294 项 / 0 失败 |
 | pyflakes | RC=0，零告警 |
 | compileall | RC=0 |
 | selfcheck | 16/16 |
@@ -298,7 +299,8 @@ else:
 | U2 | exe 打包（PyInstaller） | 未做 | 分发包仍要求用户自带 Python 3.11 |
 | U3 | 开机自启注册 | 未做 | 需要用户手工建快捷方式 |
 | U4 | 跨设备 MCP 闭环 | rc7 未重跑（rc2 时期 11/11） | 本轮对 `server.py` 改动较大（BFC-02/03），闭环需在真机上复验 |
-| U5 | 平台 B 复跑 rc7 的 294 项 | 未做 | Windows 上的租约实现（槽位锁）完全没有实跑证据 |
+| U5 | 平台 B 复跑 rc7 的 294 项 | **已做**：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0 | Windows 租约实现（64 槽位模型）现在有真机证据 |
+| U9 | 平台 B 复跑 295 项 | **未做** | Linux 侧已用 `subprocess` 起真独立进程验过跨进程互斥（`test_real_second_process_blocks_restore`）；Windows 侧这条还没跑过，而 `msvcrt` 按句柄记锁的语义正是平台 B 才需担心的 |
 | U6 | 移动端 REST/SSE 端点 | 未实现，只有角色与草案 | 第 4.7 节验的是角色边界，不是端点行为 |
 | U7 | apk 打包 | 未做 | 移动端暂无分发形态 |
 | U8 | `core.py` / `server.py` 分层重构 | 未做 | `core.py` 已 1379 行，维护成本在涨 |
@@ -316,7 +318,7 @@ cd bigfish-council
 .venv/bin/python -V                                  # 期望 3.11.x
 .venv/bin/python -c "import sqlite3;print(sqlite3.sqlite_version)"
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
-  .venv/bin/python -m unittest discover -s tests -t .   # 期望 Ran 294 / OK
+  .venv/bin/python -m unittest discover -s tests -t .   # 期望 Ran 295 / OK
 .venv/bin/python -m pyflakes bigfish tests tools      # 期望零输出
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python tools/selfcheck.py                 # 期望 16/16

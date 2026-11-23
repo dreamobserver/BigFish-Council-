@@ -39,7 +39,7 @@
 | **T2** | 执行器伪造审查票（冒充 gpt/gemini 投票） | `add_review` 校验角色与模型绑定 | **无新证据**，沿用 rc6 |
 | **T3** | 执行器自己批准自己的任务 | `approve()` 只认 `human_owner`；执行器不得参与投票 | **无新证据**，沿用 rc6 |
 | **T4** | 审批被跨版本降级绕过 | 恢复时 Authorization 作废、审批要求版本条件更新 | **有加强**：`TestLeaseAtomicity` 证明"恢复被拒后库一个字节没变"，降级路径更难被"半截恢复"打开 |
-| **T5** | 恢复过程把库搞坏（半替换、并发写） | `.prerestore` 副本 + 排空 + 授权作废 | **有加强**：BFC-01 让恢复与写者的互斥变成内核级原子操作，Linux 上有实测，Windows 侧代码已改、未实跑（见第八节） |
+| **T5** | 恢复过程把库搞坏（半替换、并发写） | `.prerestore` 副本 + 排空 + 授权作废 | **有加强**：BFC-01 让恢复与写者的互斥变成内核级原子操作。Linux 侧已用 `subprocess` 起**真正独立的第二个进程**验证互斥（`test_real_second_process_blocks_restore`）。Windows 侧于 2026-11-23 跑通全量 294 项（当时含 5 项 `TestLeaseAtomicity`，走的是槽位锁分支），但这条新用例**未在 Windows 重跑**（见第八节第 1 条与 R1） |
 | **T6** | 长期任务被看门狗误判失联 | 判定与更新同事务 + 条件更新 | **无新证据**，沿用 rc6 |
 | **T7** | 服务暴露到公网，外部来客可读可写 | `check_bind_host` 挡非回环 + `BodyLimitMiddleware` 挡大包 | **有加强（本轮最大变化）**：BFC-03 增加连接级闸门，即使误绑 0.0.0.0 外部请求也只能拿 403。见第五节 |
 | **T8** | 模型身份可被密码学证明 | 明确不实现，只做角色绑定 | **无变化**。本轮没有引入任何签名/证明机制 |
@@ -310,7 +310,7 @@
 
 | # | 残余风险 | rc7 状态 | 说明 |
 |---|---|---|---|
-| **R1** | Windows 真·双进程租约未实跑 | **仍在**（rc6 S1） | BFC-01 的 Windows 分支（槽位锁）全部带 `# pragma: no cover - 仅 Windows`，Linux 上走的是 `flock` 分支。代码写了，测试没跑。这是本轮最大的证据缺口 |
+| **R1** | Windows 真·双进程租约未实跑 | **部分修**（rc6 S1；2026-11-23 收窄两轮） | 两轮收窄：① 2026-11-23 在真机跑通全量 294 项，当时 5 项 `TestLeaseAtomicity` 走的正是 Windows 槽位锁路径（锁文件永不删除、独占拒写者、同进程第二实例不互锁、释放后独占可拿、写者存活时独占被拒）；② 收尾时补了 `test_real_second_process_blocks_restore`，用 `subprocess.Popen` 起**真正独立的第二个进程**持写者租约，主进程 `exclusive_access` 必须被拒——这条在 **Linux 上已通过**。**仍未覆盖的**：该用例**没在 Windows 上跑过**。`msvcrt.locking` 按文件句柄记锁、`_LOCAL` 按进程内引用计数，两者语义不同，所以平台 B 这一格仍是空白 |
 | **R2** | 审计包脱敏仍是模式匹配，不是 DLP | **仍在**（rc6 S2/S10） | `credential_scan.mode` 就是 `pattern-based`，`coverage` 自己承认"换行拆分、编码变形、私有格式的密钥无法保证命中"。rc7 只是把这个事实写进了 manifest，没有让它变安全 |
 | **R3** | 数据库文件未加密 | **仍在**（rc6 S11） | 保护靠文件系统权限（POSIX `0600` / Windows `icacls`）。能读到文件的人能读到全部任务正文 |
 | **R4** | `exclusive_access` 的 timeout 是重试轮询，不是排队 | **仍在**（rc6 S6） | `bigfish/locks.py:227-234` 每 50 ms 试一次，到期抛错。没有公平性保证，高并发下可能一直抢不到 |
@@ -329,7 +329,7 @@
 
 以下项目本轮**没有做**，任何地方都不代表它们通过了。列出来是为了让下一位审阅者知道边界在哪。
 
-1. **Windows 真机双进程抢租约。** 只有 Linux 上的线程级实测。Windows 的槽位锁（`SLOTS = 64`）与 `msvcrt.locking` 语义在真机上完全没有验证。这是 BFC-01 的核心，也是最大缺口（R1）。
+1. **Windows 真机·双独立进程抢租约。** 这条缺口在 Linux 上已经补掉：收尾新增 `test_real_second_process_blocks_restore`（`tests/test_v011_rc7.py:165`），用 subprocess 起**真正独立的第二个进程**持 `Database` 租约（子进程 argv 形如 `[sys.executable, flag_c, script, ROOT, path, ready, release]`），主进程 `with exclusive_access(path, timeout=1.5)` 必须抛 `LeaseError`，子进程退出后必须能拿到。Linux 全量 `Ran 295 tests in 60.507s` / `OK` / 退出码 0。**仍然没做的**是把它放到 Windows 上跑一次：Windows 的槽位锁（`SLOTS = 64`）与 `msvcrt.locking` 按文件句柄记锁、同进程走 `_LOCAL` 引用计数，这套语义只在平台 B 才现形。2026-11-23 那次 Windows 全量是 294 项（当时还没有这条用例），所以平台 B 这一格仍是空白（R1、U9）。
 2. **真实的公网暴露演练。** BFC-03 的验证用的是 `TestClient(app, client=("192.168.1.9", 54321))` 伪造 scope，不是真从另一台机器打过来。中间件的判据本身是传输层字段，伪造测试能覆盖逻辑，但覆盖不了"真实网卡绑 0.0.0.0 时 `scope["server"]` 到底填什么"——这一条需要真机。
 3. **WebSocket / SSE 长连接的闸门行为。** 当前无此端点，未测（R5）。
 4. **跨设备 MCP 闭环。** rc2 时期跑过 11/11，本轮对 `server.py` 改动较大（BFC-02 改校验、BFC-03 加中间件），闭环没重跑（测试报告 U4）。
@@ -363,11 +363,11 @@
 ```bash
 cd bigfish-council
 
-# 1) 全量测试（期望 Ran 294 / OK）
+# 1) 全量测试（期望 Ran 295 / OK）
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
 
-# 2) 只看本轮 27 项
+# 2) 只看本轮 28 项
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest tests.test_v011_rc7 -v
 
@@ -384,4 +384,4 @@ grep -n "_close_quietly\|_dispatch" bigfish/cli.py                    # BFC-05
 
 ---
 
-*本文件只描述 rc7 分支 `c0c54bc` 加未提交工作树的状态。合并之后的行号会漂移，届时以 `git log` 定位提交、以 `grep` 重新取行号为准。*
+*本文件描述 rc7 分支上相对基线 `c0c54bc` 的改动（已提交，提交号用 `git log -1 --format=%h` 取）。合并之后的行号会漂移，届时以 `git log` 定位提交、以 `grep` 重新取行号为准。*

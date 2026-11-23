@@ -10,7 +10,7 @@
 
 Codex 在仓库 `main` 上提交了 `docs/AUDIT-CODEX-v0.1.1-rc6.md`（commit `f5e955930c`，八条意见）。
 本版逐条复核，**全部确认成立**，然后逐条修。schema 未变（仍 v4），库不需要迁移；
-测试 265 → **294**（v0.1.0 的 21 项原样在位，无删除、无放宽断言）。
+测试 265 → **295**（v0.1.0 的 21 项原样在位，无删除、无放宽断言）。
 
 ### 八条意见与处理
 
@@ -58,14 +58,23 @@ Codex 在仓库 `main` 上提交了 `docs/AUDIT-CODEX-v0.1.1-rc6.md`（commit `f
 
 ### 验证
 
-- Linux 全量：`Ran 294 tests in 59.793s / OK`（`LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen`）
+- Linux 全量：`Ran 295 tests in 60.507s / OK`（`LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen`）。
+  发布前那一版是 294 项 / 59.793s；收尾时补了 1 项「真·第二个进程持租约时恢复被拒」，
+  用来关掉 SECURITY-REVIEW 里的 R1 缺口。
 - `pyflakes bigfish tools tests` 无输出；`compileall -q` RC=0
 - `tools/selfcheck.py` 16/16；`tools/gui_smoke.py` 9/9
-- 新增 `tests/test_v011_rc7.py` 27 项，逐条对应上面八条意见与手机端角色
+- 新增 `tests/test_v011_rc7.py` 28 项，逐条对应上面八条意见、手机端角色，
+  以及 1 项用 subprocess 起真正独立进程的跨进程租约用例
+- Windows 全量（2026-11-23 补跑）：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0
+  （Windows 11 / Python 3.14.6 / SQLite 3.50.4；唯一跳过的是 Windows 无 SIGINT 语义的
+  `test_graceful_shutdown_on_sigint`）。`pyflakes`（4.1.0）零输出、`compileall` RC=0、
+  `selfcheck` 16/16、`gui_smoke` 9/9。当时 `TestLeaseAtomicity` 5 项走的正是 Windows 的 64 槽位分支。（当时 294 项；此后新增 1 项跨进程租约测试，Windows 侧未重跑，见 U9）
 
 ### 仍未做（不当作已完成）
 
-平台 B（Windows）跑 rc7 全量、GUI 真窗口验收、开机自启注册、跨设备 MCP 闭环重跑。
+GUI 真窗口验收、开机自启注册、跨设备 MCP 闭环重跑、exe/apk 打包。（原本列在这里的「平台 B 跑 rc7 全量」已于 2026-11-23 完成：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0。）
+**U9：平台 B 复跑 295 项**——本轮新增的 `test_real_second_process_blocks_restore` 只在 Linux 上跑过，
+Windows 侧仍是 294 项那份结果，未重跑。跨进程语义正是 Windows 最需要验的一条，所以不当作已完成。
 
 ---
 

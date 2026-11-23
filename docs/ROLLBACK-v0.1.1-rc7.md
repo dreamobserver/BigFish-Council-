@@ -7,8 +7,8 @@
 | 能不能只换代码 | 能。库结构没变，`SCHEMA_VERSION` 两边都是 4 |
 | 能不能只换库 | 没有「只换库」这回事——rc7 没改结构，换库等于什么也没做 |
 | 正确形态 | 换代码 + 处理 mobile 身份残留；库原样留着 |
-| 已验证平台 | Debian 12 / Python 3.11.2（rc7 的 294 项全过） |
-| 未验证平台 | Windows 11 / Python 3.14.6（rc7 未在此平台跑过全量测试） |
+| 已验证平台 | Debian 12 / Python 3.11.2（rc7 的 295 项全过） |
+| 已验证平台 | Windows 11 / Python 3.14.6 / SQLite 3.50.4（rc7 的 294 项全绿：`Ran 294 tests in 74.232s` / `OK (skipped=1)`；收尾补的第 295 项未在 Windows 重跑） |
 
 ## 0. 先说结论
 
@@ -272,7 +272,7 @@ ls -la council.db.restore-new council.db.rollback ticket.key.restore-new 2>/dev/
 | 兜底提权没有编译期防线 | `role_for_db_row()` 末尾的 `return EXECUTOR_DSH` 是新旧两版共有的设计，靠「加角色时记得改三处」的注释约束。rc7 加了测试钉住 mobile，但下一个新角色还是同样的风险 |
 | `reenable_executor` 的 prefix 表没覆盖 mobile | 两版都只有三个键、默认 `bfc_ex_`。这条在 rc7 里也是不完整的，见交付文档 U6 |
 | 回滚没有自动化验证 | 本文所有步骤都在 Debian 12 上按代码路径推演过，**没有在真实生产机上完整跑过一次 rc7 → rc6 的回滚演练** |
-| Windows 侧未验证 | rc7 在 Windows 11 上没跑过 294 项，「回滚后在 Windows 上能不能开库」只有代码层面的判断 |
+| Windows 侧已验证 | rc7 在 Windows 11 上 294 项全绿（`Ran 294 tests in 74.232s`，对应 294 项那一版），其中 CLI restore 关库与租约释放相关的用例都在真机跑过；「回滚后能否开库」不再是纯代码推断 |
 
 ---
 

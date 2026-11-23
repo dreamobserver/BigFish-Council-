@@ -1,6 +1,6 @@
 # 差异说明：bigfish-council v0.1.1-rc7
 
-分支 `fix/v0.1.1-rc7-hardening`，基线 HEAD `c0c54bc`。rc6 的发布点是 tag `v0.1.1-rc6` → commit `a2e9275751`（`parents=0` 的根提交，BFC-08 指的就是它）。本轮改动**全部未提交**（git commit 被禁止），所以下面所有行号都是工作树实际行号；复核请直接读文件，不要拿 commit 去 diff。
+分支 `fix/v0.1.1-rc7-hardening`，基线 HEAD `c0c54bc`。rc6 的发布点是 tag `v0.1.1-rc6` → commit `a2e9275751`（`parents=0` 的根提交，BFC-08 指的就是它）。本轮改动已提交到 `fix/v0.1.1-rc7-hardening`（提交号用 `git log -1 --format=%h` 取）。下面所有行号取提交时的文件状态；若之后有新提交导致行号漂移，请以 `git log` 定位提交、以 `grep` 重新取行号为准。
 
 ## git diff --stat 原文
 
@@ -26,9 +26,9 @@ tests/test_v011_p2.py 29/4   test_v011_rc4.py 9/2   test_v011_rc5_review_audit.p
 
 另有 4 个未跟踪项不在 diff 里，属本轮产物：`requirements.lock`、`.github/workflows/ci.yml`、`tests/test_v011_rc7.py`、`docs/.rc7-facts.md`（末项是写文档的数据源，不是交付物）。
 
-**平台状态**：平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）跑出 `294 项 / OK / RC=0 / 59.793s`，`pyflakes` 与 `compileall` RC=0，`selfcheck` 16/16，`gui_smoke` 9/9；平台 B（Windows 11 / Python 3.14.6）**rc7 的 294 项一条没跑**（U5）。本轮最大的一处改动（`locks.py` 整文件重写）正好落在 Windows 专属分支上——槽位模型、`_LOCAL` 共享句柄、`msvcrt` 区间锁全在 `if os.name == "nt"` 里面。rc6 已经证明这类路径不可能靠 Linux 验出来（缺陷 17 就是 Windows 首跑才炸）。
+**平台状态**：平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）跑出 `295 项 / OK / RC=0 / 60.507s`，`pyflakes` 与 `compileall` RC=0，`selfcheck` 16/16，`gui_smoke` 9/9；平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）**rc7 的 294 项也已跑通**：`Ran 294 tests in 74.232s` / `OK (skipped=1)` / 退出码 0（收尾补的第 295 项未在 Windows 重跑）。本轮最大的一处改动（`locks.py` 整文件重写）正好落在 Windows 专属分支上——槽位模型、`_LOCAL` 共享句柄、`msvcrt` 区间锁全在 `if os.name == "nt"` 里面，这部分现在有真机执行记录。rc6 已经证明这类路径不可能靠 Linux 验出来（缺陷 17 就是 Windows 首跑才炸），所以平台 B 这一跑才算把 BFC-01 的验证闭环补上。
 
-**用例构成**：`test_api` 6、`test_core` 15、`p0` 16、`p1` 24、`p2` 26、`p3` 20、`rc3` 26、`rc4` 33、`rc5_cli_guard` 4、`rc5_dispatch_id` 3、`rc5_key_heal` 8、`rc5_proxy` 9、`rc5_receipts` 24、`rc5_restore_authority` 24、`rc5_review_audit` 13、`rc6` 16、`rc7` 27 = **294**。rc6 是 265，`+29` = 新增 `test_v011_rc7.py` 27 项 + `test_v011_p2.py` 净增 2 项；另两个测试文件是改写既有用例，项数不变。
+**用例构成**：`test_api` 6、`test_core` 15、`p0` 16、`p1` 24、`p2` 26、`p3` 20、`rc3` 26、`rc4` 33、`rc5_cli_guard` 4、`rc5_dispatch_id` 3、`rc5_key_heal` 8、`rc5_proxy` 9、`rc5_receipts` 24、`rc5_restore_authority` 24、`rc5_review_audit` 13、`rc6` 16、`rc7` 28 = **295**。rc6 是 265，`+30` = 新增 `test_v011_rc7.py` 28 项 + `test_v011_p2.py` 净增 2 项；另两个测试文件是改写既有用例，项数不变。
 
 ---
 
@@ -395,9 +395,9 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 
 ## 10. 未跟踪的新文件
 
-### 10.1 `tests/test_v011_rc7.py`（377 行 / 16703 字节，27 项）
+### 10.1 `tests/test_v011_rc7.py`（438 行 / 19555 字节，28 项）
 
-7 个测试类，一类对一条审计意见：`TestLeaseAtomicity` 5（`:85`）、`TestMcpFieldLimit` 4（`:167`）、`TestBindGate` 5（`:222`）、`TestManifestCredentialStatus` 3（`:257`）、`TestCliClosesDatabase` 2（`:290`）、`TestReleaseEngineering` 3（`:317`）、`TestMobileViewerRole` 5（`:347`）。两个用例决定了这 27 项是不是「真能失败」：
+7 个测试类，一类对一条审计意见：`TestLeaseAtomicity` 6（`:87`）、`TestMcpFieldLimit` 4（`:228`）、`TestBindGate` 5（`:283`）、`TestManifestCredentialStatus` 3（`:318`）、`TestCliClosesDatabase` 2（`:351`）、`TestReleaseEngineering` 3（`:378`）、`TestMobileViewerRole` 5（`:408`）。两个用例决定了这 28 项是不是「真能失败」：
 
 ```python
  93|    def test_writer_cannot_open_while_exclusive(self):
@@ -433,7 +433,7 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 
 ## 11. 文档改动（AUDIT.md 81/14、CHANGELOG.md 65/0、README.md 46/53）
 
-不计入代码侧 417/208。性质：`AUDIT.md` 版本号与测试总数升到 rc7 / 294，新增「rc6 → rc7 的 schema 变化：无」、测试表加 `test_v011_rc7.py` 27 项、平台 B 那行明确写「rc7 的 294 项尚未重跑」；`CHANGELOG.md` 新增 rc7 段（八条 + 手机端 + 验证 + 仍未做）；`README.md` 第 0 节改为「唯一下载渠道指向 GitHub Release v0.1.1-rc6」。**口径统一**：CHANGELOG 与 AUDIT.md 原先写的 `58.5s` / `58.236s` 已在发布前统一为 `59.793s`（与 `docs/.rc7-facts.md` 一致）；`TEST-REPORT` 里的 `61.458s` 是子代理复跑值，文中已注明是负载差异。
+不计入代码侧 417/208。性质：`AUDIT.md` 版本号与测试总数升到 rc7 / 295，新增「rc6 → rc7 的 schema 变化：无」、测试表加 `test_v011_rc7.py` 28 项、平台 B 那行在实跑前写的是「rc7 的 294 项尚未重跑」（已于 2026-11-23 更新为 294 项全绿）；`CHANGELOG.md` 新增 rc7 段（八条 + 手机端 + 验证 + 仍未做）；`README.md` 第 0 节改为「唯一下载渠道指向 GitHub Release v0.1.1-rc6」。**口径统一**：CHANGELOG 与 AUDIT.md 原先写的 `58.5s` / `58.236s` 已在发布前统一为 `59.793s`（与 `docs/.rc7-facts.md` 一致）；`TEST-REPORT` 里的 `61.458s` 是子代理复跑值，文中已注明是负载差异。
 
 ---
 
@@ -443,7 +443,7 @@ release 按同一套引用计数收尾，计数归零才真正解锁（`:171-180
 cd /home/dsh/bigfish-council
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
-# Ran 294 tests in 59.793s / OK / RC=0
+# Ran 295 tests in 60.507s / OK / RC=0
 
 .venv/bin/python -m pyflakes bigfish tests tools       # 零输出，RC=0
 .venv/bin/python -m compileall -q bigfish tests tools  # RC=0
@@ -452,7 +452,7 @@ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python tools/gui_smoke.py                  # 9 通过 / 0 失败
 ```
 
-以上都是**平台 A**。平台 B 一条没跑。
+以上是**平台 A**。平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）已补跑（294 项那一版）：`Ran 294 tests in 74.232s` / `OK (skipped=1)` / 退出码 0，`pyflakes` 零输出、`compileall` 退出码 0、`selfcheck` 16/16、`gui_smoke` 9/9。唯一跳过的是 `test_graceful_shutdown_on_sigint`（Windows 无 SIGINT 语义，标了 `skipIf(os.name == "nt")`）。
 
 ---
 
@@ -468,7 +468,7 @@ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
 
 ## 14. 本节没做的事
 
-1. **没跑平台 B**（U5）。294 项只有 Linux 记录；`locks.py` 的 Windows 分支（`_acquire_windows`、`_win_try_lock` 槽位寻址、`_LOCAL` 引用计数）本轮改动后**零真机执行**，而这正是 rc6 缺陷 17 的产地，优先级最高。
+1. ~~没跑平台 B（U5）~~ **已完成（2026-11-23）**：`Ran 294 tests in 74.232s / OK (skipped=1)`，退出码 0。`locks.py` 的 Windows 分支（`_acquire_windows`、`_win_try_lock` 槽位寻址、`_LOCAL` 引用计数）现在有真机执行记录，当时 5 项 `TestLeaseAtomicity` 全过。收尾时在 Linux 侧补了第 6 项：用 `subprocess` 起**真正独立的第二个进程**持写者租约，`exclusive_access` 必须被拒；Windows 侧这一项还没跑（U9）。
 2. **没打 tag、没提交。** BFC-08 只定下了流程。
 3. **CI 没在真实 runner 上跑过。** `ci.yml` 只做了本地自检（测试断言它含 ubuntu/windows/unittest/security-note、且凭据正则真能命中），没有任何 GitHub Actions 执行记录。
 4. **exe / apk / 开机自启三件产物都没做**（U2 / U7 / U3）。

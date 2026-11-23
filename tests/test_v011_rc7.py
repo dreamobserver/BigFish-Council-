@@ -20,7 +20,9 @@ from __future__ import annotations
 import io
 import json
 import re
+import subprocess
 import sys
+import time
 import tempfile
 import threading
 import unittest
@@ -159,6 +161,65 @@ class TestLeaseAtomicity(Base):
         self.assertTrue(lock.exists(), "访问锁文件没建出来")
         db.close()
         self.assertTrue(lock.exists(), "库关闭后锁文件被删了（互斥会失效）")
+
+    def test_real_second_process_blocks_restore(self):
+        """真正独立的第二个进程持有写者租约时，恢复必须被拒。
+
+        上面几条里的「第二个写者」都是同进程再开一个 Database。Windows 的
+        msvcrt 区间锁按**文件句柄**记，同进程共享句柄走的是 _LOCAL 引用计数，
+        所以那些用例根本没有真正测到跨进程互斥。这条用 subprocess 起一个独立
+        进程去持租约，两个平台走的是同一套判定。
+        """
+        path = self.root / "xproc.db"
+        probe = Database(path)
+        probe.init_schema()
+        probe.close()
+
+        ready = self.root / "child-ready.flag"
+        release = self.root / "child-release.flag"
+        script = (
+            "import sys, time" + chr(10) +
+            "from pathlib import Path" + chr(10) +
+            "sys.path.insert(0, sys.argv[1])" + chr(10) +
+            "from bigfish.db import Database" + chr(10) +
+            "db = Database(Path(sys.argv[2]))" + chr(10) +
+            "Path(sys.argv[3]).write_text('1')" + chr(10) +
+            "deadline = time.time() + 60" + chr(10) +
+            "while not Path(sys.argv[4]).exists() and time.time() < deadline:" + chr(10) +
+            "    time.sleep(0.05)" + chr(10) +
+            "db.close()" + chr(10)
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-c", script, str(ROOT), str(path), str(ready), str(release)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.time() + 60
+            while not ready.exists() and time.time() < deadline:
+                if child.poll() is not None:
+                    err = child.stderr.read().decode("utf-8", "replace")
+                    self.fail("第二个进程提前退出：" + err)
+                time.sleep(0.05)
+            self.assertTrue(ready.exists(), "第二个进程没拿到写者租约")
+            self.assertIsNone(child.poll(), "第二个进程已经退出了，这条断言测不到互斥")
+            with self.assertRaises(
+                    LeaseError,
+                    msg="真正的第二个进程正在写，恢复竟然拿到了排他锁"):
+                with exclusive_access(path, timeout=1.5):
+                    pass
+        finally:
+            release.write_text("1", encoding="utf-8")
+            try:
+                child.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
+            for stream in (child.stdout, child.stderr):
+                if stream is not None:
+                    stream.close()
+        # 第二个进程退出、租约释放之后，恢复必须能拿到
+        with exclusive_access(path, timeout=5.0):
+            pass
 
 
 # ======================================================================
