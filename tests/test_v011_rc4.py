@@ -463,10 +463,17 @@ class TestAuxiliary(Base):
         self.assertEqual({DEFAULT_API_PORT, DEFAULT_PROXY_PORT, TEST_API_PORT}, live)
 
     def test_roles_db_whitelist(self):
+        """rc7 起 mobile 已显式登记，但必须映射到只读的 MOBILE_VIEWER。
+
+        这条测试原本断言 mobile 不在 DB_ROLES 里（当时还没实现）。现在
+        实现落地了，真正要守的性质变成「登记不等于提权」。
+        """
         self.assertIn("executor", R.DB_ROLES)
         self.assertIn("admin", R.DB_ROLES)
-        self.assertNotIn("mobile", R.DB_ROLES,
-                         "未实现的 mobile 角色不该被默认当成执行器")
+        self.assertIn("mobile", R.DB_ROLES)
+        self.assertEqual(R.role_for_db_row("mobile"), R.MOBILE_VIEWER)
+        self.assertFalse(R.can(R.role_for_db_row("mobile"), "task.claim"),
+                         "登记 mobile 不等于给执行权")
 
 
 if __name__ == "__main__":

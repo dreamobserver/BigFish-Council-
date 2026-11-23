@@ -4,6 +4,71 @@
 
 ---
 
+## v0.1.1-rc7 — 2026-11-20　第五轮审计（Codex / GPT）BFC-01～BFC-08 收口
+
+**主题：把「审计指出的工程缺口」逐条落到代码与回归测试上，并补上手机的只读角色。**
+
+Codex 在仓库 `main` 上提交了 `docs/AUDIT-CODEX-v0.1.1-rc6.md`（commit `f5e955930c`，八条意见）。
+本版逐条复核，**全部确认成立**，然后逐条修。schema 未变（仍 v4），库不需要迁移；
+测试 265 → **294**（v0.1.0 的 21 项原样在位，无删除、无放宽断言）。
+
+### 八条意见与处理
+
+- **BFC-01（高）Windows 恢复 TOCTOU。** 旧 `bigfish/locks.py` 是「每 pid 一个租约文件」+ 恢复前扫描
+  `_probe_other_writers()`，再锁另一把 `council.db.access.lock`——两把不是同一个内核对象，
+  扫描返回后新 `Database` 仍能在新文件上建锁，互斥失效。**整文件重写**为一个内核对象：
+  POSIX 写者 `flock(LOCK_SH)`、恢复 `flock(LOCK_EX)`；Windows 用 64 槽位模型
+  （`msvcrt.locking(LK_NBLCK, 1)` 占 1 字节，恢复一次锁 `[0,64)`），同进程多实例靠
+  `_LOCAL` 共享句柄 + 引用计数。**没有「检查→上锁」窗口**，不再存在可插队的瞬间。
+  *踩坑记录*：第一版 `release()` 会在没人用时 unlink 租约文件，结果新实例在新 inode 上加锁、
+  老实例锁着旧 inode，`test_second_database_on_same_file_blocks_restore` 直接失败。已彻底删掉删除逻辑。
+- **BFC-02（高）MCP 无字段级 maxLength。** REST 侧 Pydantic 早有 `max_length`，MCP 的
+  `tool_specs()` 只声明 `"type": "string"`。改后 `_validate_args()` 校验 `maxLength`，
+  并给 5 处自由文本（`heartbeat.detail`、`submit_result` 的 `log/diff/tests/note`）补上
+  `MAX_TEXT_FIELD`（4 MiB，env `BFC_MAX_TEXT_FIELD`）。超限走 `isError: true`，且不留半条 artifact。
+- **BFC-03（高）create_app() 可绕过监听闸门。** `uvicorn.run(create_app(...), host="0.0.0.0")`
+  原本能整条绕过 `check_bind_host()`。改后两层：新增 `create_production_app()`
+  （启动前过闸门，serve/GUI/CLI 全切过去）+ `LoopbackGuardMiddleware`
+  （**每根连接**再判 `scope["client"]` 与 `scope["server"]`，任一非回环即 403）。
+  这样就算有人硬绑全网卡，外部也拿不到数据。`create_app()` 保留给测试与进程内挂载。
+- **BFC-04（中）审计 manifest 布尔声明过强。** `contains_plaintext_credentials: False` 与
+  `credential_scan.manual_review_required: True` 自相矛盾。改后去掉布尔承诺，换枚举
+  `credential_status`：`none` / `hashes-only`（A 类操作备份）/ `pattern-scrubbed-unverified`（B 类审计包）。
+  布尔读起来像保证，枚举只能说清「我做了什么」。
+- **BFC-05（中）CLI 非 restore 分支不关库。** 改后 `main()` 统一 `try: return _dispatch(...) finally: _close_quietly(db)`，
+  restore 分支的内联 `finally` 删掉。退出后写者租约必须立刻释放，否则 Windows 上接着调 CLI 会撞文件占用。
+- **BFC-06（中）allowed-ports 不打印预留端口。** 改后输出分 `implemented` 与 `reserved` 两块，
+  3099/3100/3101/8765/18765/18766 全打出来，免得别人以为这些号是空的。
+- **BFC-07（中）发布工程不闭环。** 新增 `requirements.lock`（39 个精确版本，本机 3.11 快照）
+  与 `.github/workflows/ci.yml`（ubuntu + windows × Python 3.11/3.13，含 pyflakes / compileall /
+  unittest / selfcheck / gui_smoke，另有 `security-note` job 扫仓库里的密钥与二进制）。
+- **BFC-08（中）tag 指向无父提交的根提交。** 已核查确认：远端 tag `v0.1.1-rc6` →
+  commit `a2e9275751`，`parents=0`（根提交），本地无此对象，与 `main` 历史不连通，溯源链断了。
+  **本版起改为在真实提交上打带注释 tag**，不再用「导出重写」的方式造根提交。
+
+### 顺带新增：手机端只读角色
+
+为后面 apk（手机操控 + 远程对话漫游）预留。`roles.py` 新增 `MOBILE_VIEWER`，
+权限只有 `task.read` / `event.read` / `review.create`——**刻意不含** `task.claim` / `run.*` /
+`approve` / `backup.*`。`_DB_ROLE_MAP` 加 `"mobile"`，token 前缀 `bfc_mb_`。
+
+这里有个真实隐患：`role_for_db_row()` 末尾对未知 db_role 会**兜底成执行器**，
+所以不显式登记 mobile 的话，手机连上来会直接拿到执行器权限。已登记，并加测试
+`test_mobile_db_role_never_falls_back_to_executor` 钉住。
+
+### 验证
+
+- Linux 全量：`Ran 294 tests in 59.793s / OK`（`LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen`）
+- `pyflakes bigfish tools tests` 无输出；`compileall -q` RC=0
+- `tools/selfcheck.py` 16/16；`tools/gui_smoke.py` 9/9
+- 新增 `tests/test_v011_rc7.py` 27 项，逐条对应上面八条意见与手机端角色
+
+### 仍未做（不当作已完成）
+
+平台 B（Windows）跑 rc7 全量、GUI 真窗口验收、开机自启注册、跨设备 MCP 闭环重跑。
+
+---
+
 ## v0.1.1-rc6 — 2026-11-20　第四轮审计（GPT-6.2 Astra）F-01～F-09 收口
 
 **主题：把「我们声称的每一道闸门」和「代码里真的发生了的那件事」对齐。** Astra 在仓库分支

@@ -254,7 +254,7 @@ tailscale serve status
 ```
 
 ```
-|-- tcp://client-b.tailf6b79c.ts.net:3096 (tailnet only)
+|-- tcp://CLIENT-B.tailf6b79c.ts.net:3096 (tailnet only)
 |-- tcp://CLIENT-B-TAILNET-IP:3096
 |--> tcp://127.0.0.1:3096
 ```

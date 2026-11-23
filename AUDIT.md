@@ -1,6 +1,6 @@
 # AUDIT.md — 给 GPT / Gemini 的审计入口
 
-> 版本：`0.1.1-rc6`　最后更新：2026-11-20
+> 版本：`0.1.1-rc7`　最后更新：2026-11-20
 > 这份文件是给你（外部审计方）的入口。它告诉你项目是什么、现在到哪一步、
 > 哪些**已经实测跑过**、哪些**明确没做**、以及作者自己最怀疑哪些地方。
 > 请把「已验证」当成「有命令可复现」，把「未验证」当成「作者也没底」。
@@ -45,13 +45,14 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | `0.1.1-rc6`（`bigfish/__init__.py:6`） |
+| 版本 | `0.1.1-rc7`（`bigfish/__init__.py:6`） |
 | 定性 | **发布候选（RC），不是生产版** |
 | 数据库 schema | v4（`bigfish/db.py:24 SCHEMA_VERSION = 4`、`:25 BACKUP_FORMAT_VERSION = 4`） |
+| rc6 → rc7 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4，没有新增 `MIGRATIONS` 项，rc6 的库直接能用，不需要迁移也不需要回滚 |
 | rc5 → rc6 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc5 的库直接能用，不需要迁移，也不需要回滚（rc4 → rc5 那次加的 `executors.disabled_reason` 列 + `idx_executors_enabled` 索引、以及 BACKUP_FORMAT_VERSION 3 → 4 都已是历史） |
-| 测试总数 | **265** 项 |
-| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **265 项全绿**（`Ran 265 tests in 41.728s`） |
-| 平台 B | Windows 11 / Python 3.13.11 / SQLite 3.50.4 → **265 项全绿**（`Ran 265 tests in 59.975s`，`OK (skipped=1)`，退出码 0）。**但首跑是 `FAILED (errors=2)`**，两条 ERROR 引出两个 Windows 专属真缺陷（msvcrt 按句柄锁、CLI restore 不关库），修完提交 `73104a8` 才全绿——见第 5 节 U5 与第 7 节 Q9 |
+| 测试总数 | **294** 项 |
+| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **294 项全绿**（`Ran 294 tests in 59.793s`） |
+| 平台 B | Windows 11 / Python 3.13.11 / SQLite 3.50.4 → rc6 的 **265 项全绿**；**rc7 的 294 项尚未在平台 B 重跑**（见第 5 节 U5）（`Ran 265 tests in 59.975s`，`OK (skipped=1)`，退出码 0）。**但首跑是 `FAILED (errors=2)`**，两条 ERROR 引出两个 Windows 专属真缺陷（msvcrt 按句柄锁、CLI restore 不关库），修完提交 `73104a8` 才全绿——见第 5 节 U5 与第 7 节 Q9 |
 | 主语言 | Python 3（标准库 + FastAPI + PySide6） |
 | 许可证 | MIT |
 
@@ -75,12 +76,17 @@
 | `tests/test_v011_rc5_cli_guard.py` | 4 | CLI 恢复探端口拒绝、`--force` 绕过、端口探测助手（含 rc6 加的「探端口早于开库」） |
 | `tests/test_v011_rc5_dispatch_id.py` | 3 | claim 下发 `dispatch_id`、重放同号、重新派工换号 |
 | `tests/test_v011_rc6.py` | 16 | 跨进程恢复租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
+| `tests/test_v011_rc7.py` | 27 | Codex 审计 BFC-01~08 各组 + 手机端只读角色（租约原子性 5 / MCP 字段上限 4 / 监听闸门 5 / manifest 枚举 3 / CLI 关库与端口 2 / 发布工程 3 / 手机角色 5） |
 
 v0.1.0 的原始 21 项（`test_core.py` + `test_api.py`）**一项没删、一项没放宽断言**。
 rc3 的 26 项、rc4 的 33 项、rc5 的 80 项、rc6 的 21 项都是新增，不是替换。
 rc5 新增 7 个文件共 **80 项**（21 + 24 + 13 + 9 + 7 + 3 + 3），
 另有 2 项加在两个既有文件里（`test_v011_p0.py` 15 → 16、`test_v011_p3.py` 19 → 20），
 合计 162 → **244**。
+
+rc7 在这 265 之上又加了 **29 项 → 294**：新增 `tests/test_v011_rc7.py` **27 项**（八条审计意见逐条对应 + 手机端角色 5 项），
+另有 2 项补进 `tests/test_v011_p2.py`（手机角色不能执行、db_role 映射不兜底成执行器）。
+**一项没删、一项没放宽断言。**
 
 rc6 在这 244 之上又加了 **21 项 → 265**：新增 `tests/test_v011_rc6.py` **16 项**
 （跨进程租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3），
@@ -120,6 +126,23 @@ rc6 在这 244 之上又加了 **21 项 → 265**：新增 `tests/test_v011_rc6.
 | F-08 | P2 | `create_app` 不负责 bind | 补长 docstring 写明「本函数不 bind socket，部署必须走 `serve()`，`uvicorn.run(create_app(...), host="0.0.0.0")` 不被支持」；选择写清边界而不是假装封死，因为 `TestClient` 依赖它不绑定 |
 | F-09 | P2 | 自由文本请求没有体积上限 | `server.py` 加 `MAX_BODY_BYTES`（默认 8 MiB，`BFC_MAX_BODY_BYTES` 可覆盖）与 `MAX_TEXT_FIELD`（默认 4 MiB）；纯 ASGI 的 `BodyLimitMiddleware` 先看 content-length、没有就包 `receive()` 边收边数，超限回 413；字段级 `max_length` 超限回 422；2 项测试 |
 
+### rc7 改了什么（一句话版）
+
+来源是 Codex 在 `main` 上提交的 `docs/AUDIT-CODEX-v0.1.1-rc6.md`（commit `f5e955930c`，八条意见，
+编号 BFC-01～BFC-08）。**逐条复核后全部确认成立**，逐条修。这一版没有加功能，全部是工程缺口收口。
+
+| # | 级别 | 主题 | 关键点 |
+|---|---|---|---|
+| BFC-01 | 高 | Windows 恢复 TOCTOU | `locks.py` **整文件重写**：旧的「每 pid 一个租约文件 + 恢复前扫描」两把锁不是同一内核对象，扫描返回后新 `Database` 仍能在新文件上建锁。改成一个对象：POSIX 写者 `flock(LOCK_SH)` / 恢复 `flock(LOCK_EX)`；Windows 64 槽位（`msvcrt.locking(LK_NBLCK,1)` 占 1 字节，恢复一次锁 `[0,64)`），同进程多实例走 `_LOCAL` 共享句柄 + 引用计数。**没有检查→上锁的窗口** |
+| BFC-02 | 高 | MCP 无字段级 maxLength | `_validate_args()` 校验 `maxLength`；`tool_specs()` 给 `heartbeat.detail` 与 `submit_result` 的 `log/diff/tests/note` 补 `MAX_TEXT_FIELD`（4 MiB，`BFC_MAX_TEXT_FIELD`）。超限走 `isError: true` 且不留半条 artifact |
+| BFC-03 | 高 | `create_app()` 可绕过监听闸门 | 新增 `create_production_app()`（启动前过 `check_bind_host`，serve/GUI/CLI 全切过去）+ `LoopbackGuardMiddleware`（**每根连接**判 `scope["client"]` 与 `scope["server"]`，任一非回环即 403）。硬绑 0.0.0.0 也拿不到数据 |
+| BFC-04 | 中 | manifest 布尔声明过强 | 去掉 `contains_plaintext_credentials: false` 这类承诺，改枚举 `credential_status`：`none` / `hashes-only` / `pattern-scrubbed-unverified` |
+| BFC-05 | 中 | CLI 非 restore 分支不关库 | `main()` 统一 `try: return _dispatch(...) finally: _close_quietly(db)`；退出后写者租约立刻释放 |
+| BFC-06 | 中 | allowed-ports 不打印预留端口 | 输出改 `implemented` + `reserved` 两块，3099/3100/3101/8765/18765/18766 全列出 |
+| BFC-07 | 中 | 发布工程不闭环 | 新增 `requirements.lock`（39 个精确版本）与 `.github/workflows/ci.yml`（ubuntu+windows × Py3.11/3.13，pyflakes/compileall/unittest/selfcheck/gui_smoke + `security-note` 密钥与二进制扫描） |
+| BFC-08 | 中 | tag 指向无父提交的根提交 | 已核实：远端 `v0.1.1-rc6` → `a2e9275751`，`parents=0`，与 `main` 历史不连通。本版起在真实提交上打带注释 tag，不再用导出重写造根提交 |
+| MOBILE | — | 手机端只读角色（为 apk 预留） | `roles.MOBILE_VIEWER`，权限只有 `task.read`/`event.read`/`review.create`；`_DB_ROLE_MAP` 加 `mobile`，token 前缀 `bfc_mb_`。**`role_for_db_row()` 对未知 db_role 会兜底成执行器**，不显式登记就会让手机拿到执行器权限——已登记并有测试钉住 |
+
 ---
 
 ## 3. 目录结构与从哪读起
@@ -157,7 +180,7 @@ docs/                交付、测试、安全、网络、迁移、回滚、架�
 
 1. `bigfish/db.py` 搜 `def snapshot(` — 看是不是用 `sqlite3.Connection.backup()` 而不是 `shutil.copy`
 2. `bigfish/backup.py` 全文 — 看 `restore_bundle` 的 swap 顺序、`swapped` 标志、失败回滚成对性
-3. `bigfish/locks.py` 全文（rc6 新增，157 行）— 看写者租约与恢复的排他租约是怎么互斥的
+3. `bigfish/locks.py` 全文（rc7 重写，约 300 行）— 看写者租约与恢复的排他租约怎么互斥；重点看「没有检查→上锁窗口」这一点
 4. `bigfish/security.py` 全文（只有几 KB）— 看 `_PATTERNS` 的 11 类模式与 `scan_secrets()`
 5. `tests/test_v011_rc3.py` 的 `TestRestore` — 7 项恢复场景
 
@@ -178,7 +201,8 @@ docs/                交付、测试、安全、网络、迁移、回滚、架�
 # Debian 12 / Python 3.11.2 / SQLite 3.40.1
 LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
-# → Ran 265 tests in 41.728s / OK / exit 0
+# rc7 → Ran 294 tests in 59.793s / OK / exit 0
+# rc6 当时 → Ran 265 tests in 41.728s / OK / exit 0
 # 复核：本次改写文件时又跑了一遍，265 项同样 OK（耗时 55.093s，仅机器负载不同）
 ```
 
@@ -191,6 +215,7 @@ $env:QT_QPA_PLATFORM = "offscreen"   # 必须；不要设 LD_LIBRARY_PATH
 
 # rc6 实测（修完两个 Windows 专属缺陷之后）：
 #   Ran 265 tests in 59.975s / OK (skipped=1) / UT_RC=0
+# rc7 的 294 项尚未在平台 B 重跑，见第 5 节 U5
 # 首次跑是 FAILED (errors=2, skipped=1)，见第 5 节 U5 与第 7 节 Q9
 ```
 
@@ -208,7 +233,7 @@ $env:QT_QPA_PLATFORM = "offscreen"   # 必须；不要设 LD_LIBRARY_PATH
 
 ### 4.4 跨设备链路
 
-VPS → Windows 客户端 `100.64.0.11:3096`（Tailscale Serve，仅 tailnet，无 Funnel）的 MCP 闭环 11/11
+VPS → Windows 客户端 `CLIENT-B-TAILNET-IP:3096`（Tailscale Serve，仅 tailnet，无 Funnel）的 MCP 闭环 11/11
 曾在 **rc2** 打通。**rc3 / rc4 / rc5 / rc6 都未重跑跨机闭环**，这四版只证了本地监听校验与协议语义。
 请不要把同机回环（`tools/e2e_loopback.py` 的 22/22）当成跨设备证据。
 
@@ -222,7 +247,7 @@ VPS → Windows 客户端 `100.64.0.11:3096`（Tailscale Serve，仅 tailnet，�
 | U2 | 开机自启 | 未注册；`tools/start-headless.ps1` 真机未跑通（`schtasks /TR` 嵌套引号报 `-2147467259`） | WMI 起的进程重启即消失 |
 | U3 | DSH MCP 连接导入 | 未导入（需人类授权） | 现在 DSH 尚未接上这个控制台 |
 | U4 | rc3 / rc4 / rc5 / rc6 跨机闭环 | 未重跑 | 跨机证据仍是 rc2 时期的 |
-| U5 | 平台 B 的 rc6 265 项 | **已跑通**：`Ran 265 tests in 59.975s / OK (skipped=1)`，退出码 0 | 跑通前修了两个 Windows 专属真缺陷（见第 7 节 Q9）。仍未跑：`selfcheck` / `gui_smoke` / `pyflakes` 在 Windows 上的第二份证据；真·双进程恢复未验 |
+| U5 | 平台 B 的 rc7 294 项 | **未跑**：平台 B 至今只跑过 rc6 的 265 项（`Ran 265 tests in 59.975s / OK (skipped=1)`，退出码 0，那次修了两个 Windows 专属真缺陷，见第 7 节 Q9） | rc7 新增的 `test_v011_rc7.py` 里 "锁文件永不删除" 与 Windows 槽位分支语义与 POSIX 不同，必须真机确认才能说平台 B 通过 |
 | U6 | 平台 B 静态检查 | `compileall` 已跑（退出码 0）；**pyflakes 未装，未做** | Windows 侧的类型/名字类检查只有 `compileall` 一份证据 |
 | U7 | 类型检查（mypy / pyright） | 未接 | 只有 `compileall` 与 `pyflakes` 两道 |
 | U8 | 长时运行（soak） | 未做 24h 连续跑 | 长期泄漏、票过期满 6 小时后行为未验 |
@@ -258,8 +283,8 @@ rc6 新增的两条残余风险：
 
 | ID | 风险 | 缓解 | 是否接受 |
 |---|---|---|---|
-| X5 | 审计包的凭据检测仍是 **pattern-based 扫描，不是 DLP** | `credential_scan.coverage` 如实写明只覆盖上述已知形态，换行拆分、编码变形、私有格式的密钥不保证命中；`manual_review_required: true` 强制人工过一遍；`hits` 是脱敏后逐字段回扫的真实统计。**注意 manifest 里那句 `contains_plaintext_credentials: false` 仍然在**——它现在的意思是「11 类已知模式已脱敏」，不是「保证无凭据」，别把它当证明 | 接受（残余，但声明与事实已对齐；见 Q7） |
-| X6 | `create_app()` **仍可被第三方 `uvicorn.run(create_app(...), host="0.0.0.0")` 绕过** | docstring 已写明「本函数不 bind socket、部署必须走 `serve()`」；官方四个入口（`__main__` / `cli serve` / `gui run()` / `serve()` 内部二次校验）都在，唯独 app 层没有强制 | 接受（写清边界而不假装封死，因为 `TestClient` 依赖它不绑定；见 Q3） |
+| X5 | 审计包的凭据检测仍是 **pattern-based 扫描，不是 DLP** | `credential_scan.coverage` 如实写明只覆盖上述已知形态，换行拆分、编码变形、私有格式的密钥不保证命中；`manual_review_required: true` 强制人工过一遍；`hits` 是脱敏后逐字段回扫的真实统计。**rc7 已把这句话删掉（BFC-04）**：改枚举 `credential_status`，`pattern-scrubbed-unverified` 明确表示"模式扫过、未经证明"。布尔读起来像保证，枚举只能说清做了什么 | 接受（残余，但声明与事实已对齐；见 Q7） |
+| X6 | `create_app()` 可被第三方 `uvicorn.run(create_app(...), host="0.0.0.0")` 绕过 | **rc7 已堵（BFC-03）**：新增 `LoopbackGuardMiddleware` 在**每根连接**上判 `scope["client"]` 与 `scope["server"]`，任一非回环即 403。即使硬绑 0.0.0.0，外部也拿不到数据；启动前闸门另由 `create_production_app()` 负责 | 已解决（双层，见 Q3 的 rc7 处置） |
 
 ---
 
@@ -329,7 +354,7 @@ URI userinfo（`scheme://user:pass@`）；原有的 `bfc-token` / `bearer` / `op
 「宣称的覆盖面」和「实际的覆盖面」对齐了，「掩码 vs 拒写」这个取舍一分没动。
 **仍然请你挑刺**：把 token 拆成两半拼接、base64 后再写，这五类新模式照样拦不住。
 
-### Q3. `check_bind_host()` 的覆盖面　【rc5 部分解决：多堵了一个入口，原疑问仍在】
+### Q3. `check_bind_host()` 的覆盖面　【rc7 已修：两层防线】
 
 `bigfish/server.py:41`：先剥 `[ ]`，再走 `is_loopback_host()`，后者**用 `ipaddress` 真解析**，
 不用「以 127. 开头」这种字符串前缀判断。因此 `::`、`[::]`、`::0`、`0:0:0:0:0:0:0:0`、`0.0.0.0`
@@ -353,8 +378,24 @@ URI userinfo（`scheme://user:pass@`）；原有的 `bfc-token` / `bearer` / `op
 `uvicorn.run(create_app(...), host="0.0.0.0")` 会绕过闸门、**不是官方入口、也不被支持**；
 以及为什么选择「写清楚边界」而不是「假装封死」——`TestClient` 依赖 `create_app` 不绑定。
 **代码层仍然没有拦**：第三方照样能自己 `uvicorn.run`。所以这条从「没人提」变成「文档写明 + 风险登记为 X6」，
-性质上没变。**仍然请你挑刺**：要不要给 `create_app()` 加一个「只接受 loopback 包装器」的参数，
-或者干脆拆成 `create_app()`（测试用）与 `serve_app()`（生产用、内部再校验）两个名字。
+性质上没变。**rc7 的处置【rc7 已修，BFC-03】**：上一轮问的「要不要拆成两个名字」，这轮做了，而且还多了一层。
+
+1. **拆名字**：新增 `create_production_app(council, host, watchdog_interval)`，返回 `(app, 归一化host)`，
+   内部先 `check_bind_host(host)`。`serve()` / `gui.ApiServer.start()` / `cli serve` 全部切过去；
+   `create_app()` 保留给 `TestClient` 与进程内挂载。
+2. **每根连接再判**：新增 `LoopbackGuardMiddleware`，取 `scope["client"][0]`（对端 IP）与
+   `scope["server"][0]`（本端 IP）。u**任一非回环即 403**。这两个字段都由传输层填充，
+   客户端伪造 Host 头改不了。所以即使有人硬写 `uvicorn.run(create_app(...), host="0.0.0.0")`，
+   外部连接会在中间件这一层被挡回去，拿不到 `/health` 也拿不到任何 API。
+   受信名单只有 `{"testclient", "testserver"}`——都是 TestClient 的进程内常量，不经过 socket。
+
+**实测**（`tests/test_v011_rc7.py::TestBindGate`，5 项）：五种伪造 scope 的判定、局域网来客 403、
+回环来客 200、受信名单不含任何真实地址、带闸门工厂拒掉 `0.0.0.0`/`::`/`[::]`/局域网/100.64 并放行回环。
+
+**仍然请你挑刺**：`scope["server"]` 在 uvicorn 绑 `0.0.0.0` 且本机回环访问时是 `127.0.0.1`
+（实测），所以那一侧对**本机**请求不起作用——真正拦住外部的是 `scope["client"]`。
+如果将来做反向代理（Tailscale Serve 就是），`client` 会变成 `127.0.0.1`，这时中间件放行，
+依赖的是「代理本身只监听 tailnet」。这个前提在 `docs/NETWORK-TOPOLOGY.md` 里，请你判断它够不够硬。
 
 ### Q4. `restore_epoch` 是否真的在快照之外　【rc4 已修】【rc5 已修（授权侧补齐）】
 
@@ -589,6 +630,30 @@ PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无�
 **顺带暴露的一条口径问题**：这两个缺陷在 Linux 上 100% 不可见，而 rc6 之前所有「已验证」的结论都来自 Linux。所以「测试全绿」这句话的作用域必须写清平台——本轮之前 DELIVERY / TEST-REPORT / SECURITY-REVIEW 都写着「平台 B 未跑」，那一版是诚实的；问题在于**当时确实没有任何机制能逼出这条**，只能靠人真的去跑一遍。
 
 ---
+### Q10. Codex 在仓库里提的八条（rc7 的全部来源）　【rc7 逐条已修】
+
+`docs/AUDIT-CODEX-v0.1.1-rc6.md`（commit `f5e955930c`）给了 BFC-01～BFC-08。逐条复核结论与处置：
+
+| # | Codex 的判断 | 我的复核 | rc7 处置 |
+|---|---|---|---|
+| BFC-01 | Windows 恢复互斥有 TOCTOU | **成立**：旧的 `_probe_other_writers()` 扫一遍再锁另一把锁，两把不是同一内核对象 | `locks.py` 整文件重写成单一内核对象（POSIX flock / Windows 64 槽位） |
+| BFC-02 | MCP 无字段级长度上限 | **成立**：REST 有 `max_length`，MCP 只有 `type: string` | `_validate_args` 校验 `maxLength`，5 处自由文本补 `MAX_TEXT_FIELD` |
+| BFC-03 | `create_app()` 可绕过监听闸门 | **成立**：上一轮已自认（X6），但只写了文档 | `create_production_app()` + `LoopbackGuardMiddleware` 双层 |
+| BFC-04 | manifest 布尔声明过强 | **成立**：`contains_plaintext_credentials: false` 与 `manual_review_required: true` 自相矛盾 | 改枚举 `credential_status` 三值 |
+| BFC-05 | CLI 非 restore 分支不关库 | **成立**：就是 Q9.2 作者自己挑刺的那条 | `main()` 统一 `finally` 关库 |
+| BFC-06 | allowed-ports 不打印预留端口 | **成立** | 输出分 `implemented` / `reserved` |
+| BFC-07 | 发布工程不闭环 | **成立**：requirements.txt 只有范围、无 lockfile、无 CI、无 exe 产物 | `requirements.lock` + `.github/workflows/ci.yml`（exe 产物仍未做，见 U2） |
+| BFC-08 | tag 指向无父提交的根提交 | **成立**：`v0.1.1-rc6` → `a2e9275751`，`parents=0`，与 `main` 历史不连通 | 本版起在真实提交上打带注释 tag |
+
+Codex 另外四条结构性意见：发布工程不闭环（BFC-07 处理一半，仍无 exe 产物）、`core.py` 与 `server.py` 耦合重（未动）、
+移动端权限模型未落地（本轮只做了角色 `MOBILE_VIEWER`，REST/SSE 端点仍是 `docs/ARCHITECTURE-FUTURE.md` 的草案）、
+exe/APK 分阶段路线（未动）。分层重构与 exe 产物明确不在 rc7 范围。
+
+**仍然请你挑刺**：槽位模型只有 64 个，同一台机器开 65 个以上 `Database` 实例会全被拒，作者没实现「耗尽时排队或降级」。
+另外 `_LOCAL` 是进程内字典，`fork` 出来的子进程会不会共享到父进程的引用计数，作者没验。
+
+---
+
 ## 8. 怎么跑起来
 
 ### Linux / macOS / WSL
@@ -641,7 +706,7 @@ Q1 ... Q8
 ## 10. 审计边界（请你遵守）
 
 - 本仓库**不含**任何真实凭据、真实执行票、真实内网 IP、真实主机名。
-  内网地址已替换为 `100.64.0.11` / `100.64.0.12` / `100.64.0.21` 这类占位，主机名替换为 `CLIENT-A` / `CLIENT-B` / `VPS-HOST`。
+  内网地址已替换为 `CLIENT-B-TAILNET-IP` / `CLIENT-A-TAILNET-IP` / `VPS-TAILNET-IP` 这类占位，主机名替换为 `CLIENT-A` / `CLIENT-B` / `VPS-HOST`。
 - `bigfish/core.py` 里的 `TICKET_PREFIX = "bfc_tk_"`、`security.py` 里的 `SECRET_PREFIXES` 都是**代码常量**，不是真票据。
 - 本项目是**单机本地工具**，威胁模型**不含**「攻击者已获得本机 root/Administrator」。
 - 提交 PR 请附带：改了哪条不变式、加了哪个测试、原有 265 项是否仍全绿。
@@ -658,11 +723,13 @@ Q1 ... Q8
 | v0.1.1-rc3 | 状态机取消语义、恢复原子性、幂等并发、监听地址、凭据脱敏 | 129 |
 | v0.1.1-rc4 | 运行时所有权、库版本识别、恢复成对原子、审查绑定、多轮执行票、MCP 协议、端口预留 | 162 |
 | v0.1.1-rc5 | 恢复后授权作废（R1）、事件落库（R2）、撤评论边界（R3）、锁内时间戳（R4）、执行收据（R5）、审计白名单（R6）、跳板硬闸门（R7）、恢复期排空（R8）、密钥自愈（R9）；schema 3 → 4 | **244** |
+| **v0.1.1-rc7** | Codex 审计 BFC-01～BFC-08 收口：`locks.py` 重写成单一内核对象（BFC-01）、MCP 字段级 `maxLength`（BFC-02）、`create_production_app` + 连接级回环闸门（BFC-03）、manifest 改 `credential_status` 枚举（BFC-04）、CLI 全分支关库（BFC-05）、`allowed-ports` 打预留端口（BFC-06）、`requirements.lock` + CI（BFC-07）、真实提交上打 tag（BFC-08）；另加手机端只读角色 `MOBILE_VIEWER`。**schema 未变，仍 v4** | **294** |
 | **v0.1.1-rc6** | Astra 审计 F-01～F-09 收口：维护模式 guard/锁原子化（F-01）、`restore_epoch` 读取修复（F-02）、密钥自愈失败拒绝启动（F-03）、CLI 端口预检前移（F-04）、GUI 停服确认（F-05）、跨进程恢复租约 `locks.py`（F-06）、审计包凭据声明诚实化（F-07）、`create_app` 边界写明（F-08）、请求体上限（F-09）；**schema 未变，仍 v4** | **265** |
 
 详见 `CHANGELOG.md`（v0.1.1-rc6 段有逐条记录）、`docs/SECURITY-REVIEW-v0.1.1-rc5.md`、
 `docs/FIX-MATRIX-v0.1.1-rc4.md`、`docs/DIFF-SUMMARY-v0.1.1-rc4.md`。
-rc6 目前还没有对应的 `docs/` 专档，证据散在 `CHANGELOG.md`、`tests/test_v011_rc6.py` 与第 4 节。
+rc7 的证据在 `CHANGELOG.md` 的 rc7 段、`tests/test_v011_rc7.py`（27 项）与本文件第 7 节 Q3/Q9.2/Q10。
+rc6 也没有单独的 `docs/` 专档，证据散在 `CHANGELOG.md`、`tests/test_v011_rc6.py` 与第 4 节。
 
 ---
 

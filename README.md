@@ -1,40 +1,31 @@
-# BigFish Council / 大肥鱼议事厅 v0.1.1-rc6
+# BigFish Council / 大肥鱼议事厅 v0.1.1-rc7
 
 Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 人类在本机批准，云端只能领取**已批准**的任务，回传结果后仍需人类验收。
 
 全程不开放任何公网端口，不使用 Tailscale Funnel。
 
-> **rc6 是第四轮审计（GPT-6.2 Astra）后的收口版。** Astra 在仓库分支
-> `review/rc5-hardening-20261120` 的 `AUDIT_REVIEW.md` 里给了 9 条（F-01～F-09），
-> 其中 4 条它自己已经修好，本轮 cherry-pick 后验证；另 5 条本轮新写。
+> **rc7 是第五轮审计（Codex，在仓库里直接提的 8 条）后的收口版。**
+> 八条 BFC-01～BFC-08 全部复核成立并已修，另加一个手机端只读角色：
 >
-> - **F-01**（Astra）维护模式的 guard 与锁不是原子的 → `query/one/execute` 与 `_Tx.__enter__` 全改成锁内 guard；
-> - **F-02**（Astra）`restore_epoch` 被 `except: 0` 吞掉、世代单调递增失效 → 改到 `_allow_during_maintenance()` 里读；
-> - **F-03**（Astra）密钥一致性自愈失败时仍启动（fail-open）→ `runtime.py` 改成 `db.close()` + 抛 `CouncilError`；
-> - **F-04**（Astra）CLI `restore` 的端口预检晚于开库 → 提到 `open_council` 之前；
-> - **F-05** 本轮：GUI 停服失败被当成成功 → `ApiServer.stop()` 超时后检查 `is_alive()` 并抛 `TimeoutError`，`pause_services()` 先停成功再置标志；
-> - **F-06** 本轮：跨进程恢复互斥只是尽力而为 → 新建 `bigfish/locks.py`，写者持共享租约、恢复抢排他锁（POSIX fcntl / Windows msvcrt）；
-> - **F-07** 本轮：审计包「无明文凭据」声明过强 → `scrub()` 补 5 类模式、manifest 改为 `credential_scan` + `manual_review_required: true`，不再写「保证」；
-> - **F-08** 本轮：`create_app()` 不负责 bind → 在 docstring 里写清边界（不假装封死，因为 `TestClient` 依赖它不绑定）；
-> - **F-09** 本轮：自由文本请求无体积上限 → 新增 ASGI 层 `BodyLimitMiddleware`（8 MiB，超限 413）+ 字段级 `max_length`（超限 422）。
+> - **BFC-01** 跨进程租约「检查→上锁」之间有窗口 → `bigfish/locks.py` 重写成单一内核对象（约 300 行），租约文件句柄本身就是锁，不再有先查后锁；
+> - **BFC-02** MCP 自由文本字段没有长度上限 → 5 个工具的自由文本字段全部声明 `maxLength`，超限返回 `isError: true` 且**不落库**；
+> - **BFC-03** `create_app()` 不负责 bind，`TestClient` 走网络时绕过回环闸门 → 新增 `create_production_app()`（返回 `(app, host)`）+ ASGI 层 `LoopbackGuardMiddleware`，按**连接来源**判定，非回环一律 403；
+> - **BFC-04** manifest 的 `contains_plaintext_credentials: false` 与 `manual_review_required: true` 自相矛盾 → 换成三值枚举 `credential_status`（`none` / `hashes-only` / `pattern-scrubbed-unverified`）；
+> - **BFC-05** CLI 非 restore 分支不关库 → `main()` 用统一 `finally` 关库，进程退出后别人能立刻拿到排他租约；
+> - **BFC-06** `allowed-ports` 不打印预留端口 → 输出拆成 `implemented`（3096/3097/3098）与 `reserved`（3099/3100/3101/8765/18765/18766）；
+> - **BFC-07** 发布工程不闭环 → 新增 `requirements.lock`（精确 pin）与 `.github/workflows/ci.yml`（ubuntu + windows 双跑、含令牌泄漏扫描）。**exe 产物仍未做**（见 AUDIT.md §5 U2）；
+> - **BFC-08** `v0.1.1-rc6` 的 tag 指向一个没有父提交的根提交，与 `main` 历史不连通 → 本版起 tag 打在真实提交上、带注释；
+> - **MOBILE** 手机端只读角色 `MOBILE_VIEWER`：`register_executor(..., "mobile")`、token 前缀 `bfc_mb_`、有 `task.read` 没有 `task.claim`。REST/SSE 端点仍是 docs/ARCHITECTURE-FUTURE.md 的草案。
 >
 > **schema 本轮未变，仍为 v4**（`SCHEMA_VERSION=4` / `BACKUP_FORMAT_VERSION=4`），数据库不需要迁移。
-> 测试从 244 项涨到 **265 项**，v0.1.0 的 21 项原样在位、无删除、无放宽断言。
+> 测试从 265 项涨到 **294 项**，v0.1.0 的 21 项原样在位、无删除、无放宽断言。
 >
-> **v0.1.1-rc6 仍然是发布候选，不是生产版。** Astra 的 5 条发布门槛满足 3 条：
-> Linux 全量 265 项全绿 ✅、**Windows 全量 265 项全绿 ✅**、F-01～F-04 回归测试全过 ✅、跨进程恢复锁方案双平台落地 ✅；
-> 还欠 **GUI 真窗口验收**与**跨设备 MCP 闭环重跑**。详见 [docs/DELIVERY-v0.1.1-rc6.md](docs/DELIVERY-v0.1.1-rc6.md)。
+> **rc7 仍是发布候选，不是生产版。** 平台 A（Debian 12 / Python 3.11.2）**294 项全绿**（`Ran 294 tests in 59.793s` + `OK`，退出码 0）；
+> **平台 B（Windows 11 / Python 3.14.6）的 rc7 294 项尚未重跑**，上一次是 rc6 的 265 项全绿。
+> 还欠 **GUI 真窗口验收**、**开机自启注册**、**跨设备 MCP 闭环重跑**。详见 AUDIT.md §5 与 CHANGELOG.md。
 >
-> Windows 那次全绿是**修完两个 Windows 专属真缺陷**换来的，不是一次干净的首跑：
-> 首跑 `FAILED (errors=2, skipped=1)`，两条 ERROR 都是 `LeaseError: … [Errno 13] Permission denied`——
-> ① `msvcrt.locking` 的字节区间锁按**文件句柄**记，同进程第二个 `Database` 会被误判成「有别人在用」；
-> ② `cli.py` 的 restore 分支不关库，Windows 上进程未退出前文件仍被占用（`WinError 32`）。
-> 两条修完提交 `73104a8` 之后才是 `Ran 265 tests in 59.975s / OK (skipped=1)`。
-> 已实测的平台差异：密钥文件真正生效的是 NTFS ACL（`icacls`）而非 `os.chmod`；`subprocess.terminate()` 退出码是 1 而非 -15。
->
-> 跨设备联调（VPS → 公司机 MCP 闭环 11/11）已在 rc2 打通，但那条链路验的是 rc2 代码；
-> 「常驻」（WMI 起的进程重启即消失）、GUI 真窗口、MCP 连接导入仍未做。详见 [docs/NETWORK-TOPOLOGY.md](docs/NETWORK-TOPOLOGY.md) §4.4。
+> 跨设备联调（VPS → 公司机 MCP 闭环 11/11）已在 rc2 打通，但那验的是 rc2 代码。详见 docs/NETWORK-TOPOLOGY.md §4.4。
 
 ---
 
@@ -42,15 +33,18 @@ Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 
 唯一的正式分发渠道是本仓库的 **GitHub Release**，不额外挂任何分发站点：
 
-<https://github.com/dreamobserver/BigFish-Council-/releases/tag/v0.1.1-rc6>
+<https://github.com/dreamobserver/BigFish-Council-/releases/tag/v0.1.1-rc7>
 
 | 附件 | 用途 |
 | --- | --- |
-| `bfc-src-v011rc6.zip` | rc6 完整源码树（93 文件 / 700884 字节 / sha256 `dc5623658be0e3162928d3b0419e6831432fd634b042b4bea4492f4a8726c35f`）。解压即用，不需要 git |
-| `bfc-rc3-to-rc6.patch` | rc3 发布点（`832f699`）→ rc6 的完整统一 diff，73 文件，含文档 |
-| `bfc-rc3-to-rc6-code.patch` | 同上但只含 `bigfish/ tests/ tools/ requirements.txt`（34 文件），给只想读代码改动的人 |
-| `BigFish-rc6-handoff.zip` | 交接包：上面三样 + 文件清单 + `SHA256SUMS` + 一份写了「怎么打、跑什么、预期输出、三个阻断点实测结论、还没做的别当成做了」的 READ-ME |
-| `gemini-review-bundle.txt` | 单文件纯文本审计快照（94 文件 / 1733152 字节 / 31338 行），给读不到仓库正文的网页版模型直接喂 |
+| `bfc-src-v011rc7.zip` | rc7 完整源码树。解压即用，不需要 git |
+| `bfc-rc6-to-rc7.patch` | rc6 发布点 → rc7 的完整统一 diff，含文档 |
+| `bfc-rc6-to-rc7-code.patch` | 同上但只含 `bigfish/ tests/ tools/ requirements*`，给只想读代码改动的人 |
+| `SHA256SUMS.txt` | 上面每个附件的 sha256 |
+| `gemini-review-bundle.txt` | 单文件纯文本审计快照，给读不到仓库正文的网页版模型直接喂 |
+
+> 每个附件的**文件数与 sha256 以 Release 页与本包内 `SHA256SUMS.txt` 为准**——
+> 写进 README 的固定值会在下一次重打包时失真，这里不再钉死。
 
 只想要最新代码、不要发布包，直接 clone 即可：
 
@@ -58,15 +52,6 @@ Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 git clone https://github.com/dreamobserver/BigFish-Council-.git
 cd BigFish-Council-
 ```
-
-```bash
-# 打完补丁想核对是否与发布点一致
-git diff --stat 832f699 539cf3e   # 73 files changed, 18531 insertions(+), 555 deletions(-)
-```
-
-> 已知无害警告：`git apply` 干跑能过，正式 apply 时会报一条 `new blank line at EOF` 的 whitespace 警告，来自某个文件末尾的空行，不影响内容。
-
----
 
 ## 1. 架构
 
@@ -287,6 +272,13 @@ BFC_BASE_URL=http://CLIENT-B-TAILNET-IP:3096 BFC_TOKEN=<执行器 token> \
 | `docs/TESTLOG-v0.1.1-rc6.md` | rc6 原始工作日志（含中途失败与修法） |
 | `docs/MIGRATION-v0.1.1-rc6.md` | rc6 迁移说明（schema 未变 + 新增 .access.lock 文件 + manifest 结构变化） |
 | `docs/ROLLBACK-v0.1.1-rc6.md` | rc6 回滚到 rc5 的步骤与验证 |
+| `docs/FIX-MATRIX-v0.1.1-rc7.md` | **rc7 修复总表：BFC-01～BFC-08 + 手机只读角色，逐条给文件行号与回归测试** |
+| `docs/DIFF-SUMMARY-v0.1.1-rc7.md` | **rc7 代码 Diff 摘要（按文件给真实代码片段）** |
+| `docs/TEST-REPORT-v0.1.1-rc7.md` | **rc7 测试报告：294 项逐文件统计 + 27 项新增逐条说明** |
+| `docs/SECURITY-REVIEW-v0.1.1-rc7.md` | **rc7 安全复审：八问逐条 + 五个新增安全面 + 残余风险** |
+| `docs/DELIVERY-v0.1.1-rc7.md` | **rc7 交付说明：九条修复、验证证据、需授权项** |
+| `docs/MIGRATION-v0.1.1-rc7.md` | rc6 → rc7 迁移（schema 未变，无需库迁移） |
+| `docs/ROLLBACK-v0.1.1-rc7.md` | rc7 → rc6 回滚步骤与风险 |
 | `docs/SECURITY-REVIEW-v0.1.1-rc5.md` | rc5 安全复核：R1–R9 逐条语义、威胁模型 T1–T8 现状、残余风险 |
 | `docs/TEST-REPORT-v0.1.1-rc5.md` | **rc5 测试报告：244 项逐文件统计、平台 A 实测、平台 B 未跑** |
 | `docs/TESTLOG-v0.1.1.md` | 实测日志与缺陷根因 |
@@ -310,7 +302,7 @@ cd D:\BigFishCouncil\bigfish-council
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t . -v
 ```
 
-**265 个用例**（v0.1.0 原有 21 项全部保留 + 244 项新增，无 skip / 无 expectedFailure）：
+**294 个用例**（v0.1.0 原有 21 项全部保留 + 273 项新增，无 skip / 无 expectedFailure）：
 
 | 文件 | 数量 | 覆盖 |
 | --- | --- | --- |
@@ -318,7 +310,7 @@ cd D:\BigFishCouncil\bigfish-council
 | `test_api.py` | 6 | HTTP 端点、MCP 往返、不暴露审批工具 |
 | `test_v011_p0.py` | 16 | SQLite 备份/恢复、审批并发、无明文执行票 |
 | `test_v011_p1.py` | 24 | Watchdog、执行票续期、心跳幂等、MCP 错误语义 |
-| `test_v011_p2.py` | 24 | 四角色表、审查身份绑定、执行器边界、审计 |
+| `test_v011_p2.py` | 26 | 四角色表、审查身份绑定、执行器边界、审计、手机端只读角色 2 |
 | `test_v011_p3.py` | 20 | 端口拓扑、只允许回环、后台进程、GUI 冒烟 |
 | `test_v011_rc3.py` | 26 | 状态机 7 + 并发 7（真线程 + Barrier）+ 恢复 7 + 安全边界 5 |
 | `test_v011_rc4.py` | 33 | 幂等契约 6 + MCP 协议 7 + 多轮执行票 6 + 审查绑定 4 + 执行器客户端 4 + 辅助 6 |
@@ -329,7 +321,8 @@ cd D:\BigFishCouncil\bigfish-council
 | `test_v011_rc5_key_heal.py` | 8 | 指纹首次补记不动票 2 + 轮换吊销活票 5 |
 | `test_v011_rc5_cli_guard.py` | 4 | CLI 恢复探端口拒绝 1 + `--force` 绕过 1 + 端口探测助手 1 |
 | `test_v011_rc5_dispatch_id.py` | 3 | claim 下发 dispatch_id 1 + 重放同号 1 + 重新派工换号 1 |
-| `test_v011_rc6.py` | 16 | **rc6 新增**：跨进程租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
+| `test_v011_rc6.py` | 16 | 跨进程租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
+| `test_v011_rc7.py` | 27 | **rc7 新增**：租约原子性 5 + MCP 字段上限 4 + 回环闸门 5 + manifest 凭据枚举 3 + CLI 关库 2 + 发布工程 3 + 手机只读角色 5 |
 
 自检 16 项：
 
@@ -344,11 +337,11 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe tools\gui_smoke.py
 ```
 
-平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）**265 项全绿**（实测 `Ran 265 tests in 41.728s` + `OK`，退出码 0）；
-平台 B（Windows 11 / Python 3.13.11 / SQLite 3.50.4）**265 项全绿**（`Ran 265 tests in 59.975s` + `OK (skipped=1)`，退出码 0）——
-跑通前修了两个 Windows 专属真缺陷（msvcrt 按句柄锁、CLI restore 不关库），首跑是 `FAILED (errors=2)`。
-结果见 [docs/TEST-REPORT-v0.1.1-rc6.md](docs/TEST-REPORT-v0.1.1-rc6.md)
-与 [docs/TESTLOG-v0.1.1-rc6.md](docs/TESTLOG-v0.1.1-rc6.md)。
+平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）**rc7 的 294 项全绿**（实测 `Ran 294 tests in 59.793s` + `OK`，退出码 0）。
+平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）**rc7 的 294 项尚未重跑**；最近一次是 rc6 的 265 项全绿
+（`Ran 265 tests in 59.975s` + `OK (skipped=1)`，退出码 0，当时修完两个 Windows 专属真缺陷：msvcrt 按句柄锁、CLI restore 不关库，首跑是 `FAILED (errors=2)`）。
+这一项在 AUDIT.md §5 U5 里明确记为未完成，不当作已完成。
+结果见 [AUDIT.md](AUDIT.md) §4 与 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 7. 安全边界（必读）
 
@@ -363,15 +356,15 @@ $env:QT_QPA_PLATFORM = "offscreen"
 
 ## 8. 升级
 
-### 8.1 从 v0.1.0 / rc1 / rc2 / rc3 / rc4 / rc5 升到 rc6
+### 8.1 从 v0.1.0 / rc1 / rc2 / rc3 / rc4 / rc5 / rc6 升到 rc7
 
 1. 停掉所有进程（GUI、headless、任何打开着数据库的东西）；
 2. **完整备份数据目录**（含 `secrets\ticket.key`）；
 3. 换代码；
 4. 首次启动自动迁移：schema 1 → 2 → 3 → 4，全部只 ADD COLUMN + 建表建索引，不重建表；
-5. 跑 `python -m unittest discover -s tests -t .`，期望 `Ran 265 tests` + `OK`。
+5. 跑 `python -m unittest discover -s tests -t .`，期望 `Ran 294 tests` + `OK`。
 
-**rc5 → rc6 没有 schema 变化**（SCHEMA_VERSION 仍 4、BACKUP_FORMAT_VERSION 仍 4）：
+**rc6 → rc7 没有 schema 变化**（SCHEMA_VERSION 仍 4、BACKUP_FORMAT_VERSION 仍 4）：
 rc6 只改行为，数据库不用迁移。新增的磁盘痕迹只有租约文件：
 `council.db.access.lock`（POSIX 用 fcntl 共享/排他锁）与 Windows 侧的
 `council.db.access.<pid>.lock`（msvcrt 没有共享锁，改成每个写者一个文件）。
@@ -411,7 +404,7 @@ rc6 只改行为，数据库不用迁移。新增的磁盘痕迹只有租约文�
 
 - 升级前先确认没有第二个 GUI 实例开着数据库（`os.replace` 在 Windows 上会因文件占用失败）；
 - 密钥文件权限走 `icacls`（不是 chmod），首次创建时会自动收紧；
-- **Windows 侧本批次没有跑 rc6**：上一次 Windows 全量是 rc3 的 129 项（25.263s / 退出码 0）；
+- **Windows 侧 rc7 还没跑**：最近一次 Windows 全量是 rc6 的 265 项全绿（59.975s / 退出码 0）。
   rc4 的 162 项、rc5 的 244 项、rc6 的 265 项在 Windows 上都属于未验证，升级到新机器后先跑一遍自检再上业务；
 - **Windows 的恢复锁分支（msvcrt）没在真机验证过**：POSIX 的 fcntl 分支有 6 项单测，
   Windows 走的是另一套 `<db>.access.<pid>.lock` 探活逻辑，只在代码层面推演过；

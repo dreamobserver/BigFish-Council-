@@ -298,7 +298,7 @@ LISTEN=127.0.0.1 pid=15692
 == Tailscale Serve ==
 $ tailscale serve --bg --tcp 3096 tcp://127.0.0.1:3096
 SERVE_RC=0
-|-- tcp://client-b.tailf6b79c.ts.net:3096 (tailnet only)
+|-- tcp://CLIENT-B.tailf6b79c.ts.net:3096 (tailnet only)
 |-- tcp://CLIENT-B-TAILNET-IP:3096
 |--> tcp://127.0.0.1:3096
 

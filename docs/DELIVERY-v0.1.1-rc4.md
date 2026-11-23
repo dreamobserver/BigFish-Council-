@@ -496,7 +496,7 @@ ACL）出问题时没有基线可对照。
 
 rc3 期间开过的转发：
 
-    |-- tcp://client-b.tailf6b79c.ts.net:3096 (tailnet only)
+    |-- tcp://CLIENT-B.tailf6b79c.ts.net:3096 (tailnet only)
     |--> tcp://127.0.0.1:3096
 
 rc4 若要用它重跑跨机闭环，需要确认这条还在、端口对上（rc4 默认端口没改）、

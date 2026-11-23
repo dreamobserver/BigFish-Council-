@@ -61,7 +61,7 @@ status: {"status":"SUBMITTED","status_label":"待验收"}
 ## 4. 网络实测（只读）
 
 - VPS 容器可直接访问 Tailnet IP：`CLIENT-A-TAILNET-IP:8765 OPEN`、`:22 OPEN`、`:445 OPEN`。
-- MagicDNS 不可用（`getent client-a` 失败），必须用 IP。
+- MagicDNS 不可用（`getent CLIENT-A` 失败），必须用 IP。
 - 容器内无 `tailscale` CLI / 无 `/dev/net/tun`，但与宿主共享 netns，所以 100.x 可达。
 
 ## 5. GUI 离屏冒烟（VPS 无显示器，QT_QPA_PLATFORM=offscreen）

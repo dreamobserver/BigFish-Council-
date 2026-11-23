@@ -163,7 +163,7 @@ CLIENT-B-TAILNET-IP            tailscaled  10740   <- Serve 的 IPv4 转发
 ```
 tailscale serve --bg --tcp 3096 tcp://127.0.0.1:3096
 tailscale serve status
--> |-- tcp://client-b.tailf6b79c.ts.net:3096 (tailnet only)
+-> |-- tcp://CLIENT-B.tailf6b79c.ts.net:3096 (tailnet only)
    |-- tcp://CLIENT-B-TAILNET-IP:3096
    |--> tcp://127.0.0.1:3096
 ```
@@ -223,7 +223,7 @@ $ BFC_BASE_URL=http://CLIENT-B-TAILNET-IP:3096 BFC_TOKEN=<执行器 token> \
 
 1. ✅ `Get-NetTCPConnection -LocalPort 3096 -State Listen` 必须看到
    `LocalAddress = 127.0.0.1`（**不能**是 `0.0.0.0`）。
-2. ✅ `tailscale status` 里 CLIENT-B 与 vps-host 在线（`BackendState: Running`）。
+2. ✅ `tailscale status` 里 CLIENT-B 与 VPS-HOST 在线（`BackendState: Running`）。
 3. ✅ 在 VPS 上 `curl http://CLIENT-B-TAILNET-IP:3096/health` 通。
    **启动方式用 WMI `Win32_Process.Create`；不要用 `Start-Process` 经 windows-mcp
    后台起 python，否则会堵死单队列执行器。**
@@ -245,7 +245,7 @@ CLIENT-B (Windows, CLIENT-B-TAILNET-IP)
         |
   CLIENT-B-TAILNET-IP:3096  <- 只在 tailnet 内可见
 
-vps-host VPS (VPS-TAILNET-IP, 容器共享宿主 netns)
+VPS-HOST (VPS-TAILNET-IP, 容器共享宿主 netns)
   DSH / 执行器客户端  --- Tailnet ---> CLIENT-B-TAILNET-IP:3096
   127.0.0.1:3098  bfc-proxy.mjs 跳板（给 dsh-mcp-connector 用，它只收回环/RFC1918）
 ```
@@ -315,7 +315,7 @@ rc3 把校验下沉到 `server.serve()` 和 `gui.run()`，四条入口全部经�
 
 ```
 $ tailscale serve status
-|-- tcp://client-b.tailf6b79c.ts.net:3096 (tailnet only)
+|-- tcp://CLIENT-B.tailf6b79c.ts.net:3096 (tailnet only)
 |-- tcp://CLIENT-B-TAILNET-IP:3096
 |-- tcp://[fd7a:...]:3096
     -> tcp://127.0.0.1:3096

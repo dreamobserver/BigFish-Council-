@@ -1,208 +1,265 @@
-"""跨进程「谁在用这个库」租约 + 恢复期排他锁（rc6 F-06）.
+"""跨进程「谁在用这个库」租约 + 恢复期排他锁.
 
-问题（审计 F-06）：restore 只和另一个 restore 互斥，管不住**普通 Database 实例**。
-POSIX 上替换文件后旧连接继续写旧 inode（数据静默分叉），Windows 上直接替换失败。
+问题（rc6 F-06 / rc7 BFC-01）：restore 只和另一个 restore 互斥，管不住
+**普通 Database 实例**。POSIX 上替换文件后旧连接继续写旧 inode（数据静默分叉），
+Windows 上直接替换失败。
 
-办法：所有 Database 实例在打开时持一份**写者租约**（writer lease），恢复流程
-必须拿到**排他访问锁**才能替换文件。
+rc6 的 Windows 实现是「先扫一遍别的 pid 的租约文件，再去锁另一把文件」——
+扫描和上锁之间，新写者可以插进来把库打开。这就是审计 BFC-01 说的 TOCTOU：
+两把锁不是同一个内核对象，所以「我检查过了没人」这句话在上锁那一刻已经过期。
 
-- POSIX：两者同一把 flock，写者 LOCK_SH（可多个），恢复 LOCK_EX（与任何写者互斥）。
-- Windows：msvcrt 只有排他锁，没有共享锁。写者各自持有一个
-  `<db>.access.<pid>.lock`（同一 pid 自然唯一），恢复逐个试探这些文件：
-  能锁上说明那个 pid 已经退出（租约文件是残留），删掉继续；锁不上说明还活着，
-  直接拒绝恢复。这不是共享锁，但得到的是同一个结论：有人在用，就不许换。
+rc7 改成**一个内核对象 + 原子语义**，再没有「检查」与「生效」之间的空档：
 
-Windows 的一个坑（rc6 平台 B 实测）：msvcrt.locking 的字节区间锁是**按文件句柄**
-的，同一进程用第二个句柄去锁同一区间会拿到 EACCES。而租约的语义本来就是
-「每进程一份」，所以同一进程内的多个 Database 实例必须共享同一个句柄，用引用
-计数决定什么时候真正释放——否则同进程开第二个实例会被误判成「有别人在用」，
-把本该成功的用例打成 LeaseError。
+- POSIX：访问锁文件上，写者持 flock **LOCK_SH**（可多个），恢复持 **LOCK_EX**
+  （与任何写者互斥）。flock 本身就是原子的，不需要扫谁。
+- Windows：msvcrt 只有排他区间锁、表达不了共享锁，所以改用**槽位模型**：
+  访问锁文件预留 SLOTS 个字节，每个写者独占其中 1 个字节（从自己的 pid
+  开始往后找空槽），恢复端一次性锁住 **整段 SLOTS 字节**。
+  任何一个写者占着槽，恢复就锁不上；反过来恢复持着整段时，写者连一个槽
+  都拿不到。同一文件、同一段字节区间，由 Windows 内核保证互斥——同样没有
+  「检查完再上锁」的时间窗。
+
+同一进程内多个 Database 实例的问题（rc6 平台 B 实测过）：Windows 的区间锁是
+**按文件句柄**记的，同一进程第二个句柄去锁同一区间会 EACCES。而租约语义是
+「每进程一份」，所以 Windows 侧用 _LOCAL 表把同进程实例共享成一个句柄并做
+引用计数。POSIX 的 LOCK_SH 天然允许多个句柄共享，不需要这张表。
 """
 from __future__ import annotations
 
 import contextlib
 import os
 import threading
+import time
 from pathlib import Path
+
+# Windows 槽位总数：同时最多这么多进程持有写者租约。超出属于异常用法，
+# 宁可明确报错也不要静默放行。
+SLOTS = 64
+
+DEFAULT_RESTORE_TIMEOUT = 5.0        # 恢复：给上层把连接关掉留一点余量
+
+# Windows 专用：访问锁文件绝对路径 -> [文件句柄, 引用计数, 槽位号]
+# POSIX 不需要，因为 flock 允许多个句柄各自 LOCK_SH。
+_LOCAL: dict[str, list] = {}
+_LOCAL_LOCK = threading.Lock()
 
 
 class LeaseError(RuntimeError):
     """拿不到访问锁：说明还有别的进程/实例在使用这个数据库。"""
 
 
-_guard = threading.Lock()
-
-# Windows 专用：锁文件路径 -> [文件句柄, 引用计数]。
-# POSIX 不需要，因为 flock 可以对同一文件开多个句柄各自 LOCK_SH。
-_win_leases: dict = {}
-
-
-def _lock_file(db_path: Path) -> Path:
-    """POSIX 用同一个文件；Windows 用按 pid 分开的文件。"""
+def access_lock_path(db_path: Path) -> Path:
     p = Path(db_path)
-    if os.name == "nt":                      # pragma: no cover - 仅 Windows
-        return p.with_name(p.name + f".access.{os.getpid()}.lock")
     return p.with_name(p.name + ".access.lock")
 
 
+def restore_gate_path(db_path: Path) -> Path:
+    p = Path(db_path)
+    return p.with_name(p.name + ".restore.lock")
+
+
+def _open_rw(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return open(path, "a+b")
+
+
+def _posix_flock(fh, exclusive: bool) -> bool:
+    """非阻塞加锁；成功返回 True。"""
+    try:
+        import fcntl
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        fcntl.flock(fh.fileno(), mode | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _posix_unlock(fh) -> None:
+    try:
+        import fcntl
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _win_try_lock(fh, offset: int, nbytes: int) -> bool:
+    """Windows：在 [offset, offset+nbytes) 上做非阻塞独占区间锁。"""
+    try:
+        import msvcrt
+        fh.seek(offset)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, nbytes)
+        return True
+    except OSError:
+        return False
+
+
+def _win_unlock(fh, offset: int, nbytes: int) -> None:
+    try:
+        import msvcrt
+        fh.seek(offset)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, nbytes)
+    except OSError:
+        pass
+
+
 class WriterLease:
-    """一个 Database 实例持有到 close() 为止的共享访问权。"""
+    """一个 Database 实例持有到 close() 为止的写者身份。
+
+    必须在**打开 sqlite 连接之前**取得（Database.__init__ 就是这么做的），
+    否则「库已经被我打开」这件事对恢复端不可见。
+    """
 
     def __init__(self, db_path: Path):
         self.path = Path(db_path)
+        self._lock_path = access_lock_path(self.path)
         self._fh = None
         self._key = None
+        self._slot = None
         self.acquire()
 
+    # ------------------------------------------------------------------
     def acquire(self) -> None:
         if self._fh is not None:
             return
-        target = _lock_file(self.path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if os.name == "nt":                  # pragma: no cover - 仅 Windows
-            key = str(target)
-            with _guard:
-                held = _win_leases.get(key)
-                if held is not None:
-                    # 同一进程已经在用这个库：共用句柄，只加计数。
-                    held[1] += 1
-                    self._fh = held[0]
-                    self._key = key
-                    return
-                fh = open(target, "a+b")
-                try:
-                    import msvcrt
-                    fh.seek(0)
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError as exc:
-                    fh.close()
-                    raise LeaseError(
-                        f"无法登记数据库写者租约（{target}）：{exc}") from None
-                _win_leases[key] = [fh, 1]
-                self._fh = fh
-                self._key = key
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            self._acquire_windows()
             return
-        fh = open(target, "a+b")
-        try:
-            import fcntl
-            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
-        except OSError as exc:
+        fh = _open_rw(self._lock_path)
+        if not _posix_flock(fh, exclusive=False):
             fh.close()
             raise LeaseError(
-                f"无法登记数据库写者租约（{target}）：{exc}") from None
+                "数据库正在恢复或维护中，暂时不能打开（"
+                + str(self._lock_path) + "）。请稍后重试。")
         self._fh = fh
+        self._key = str(self._lock_path.resolve())
 
+    def _acquire_windows(self) -> None:           # pragma: no cover - 仅 Windows
+        key = str(self._lock_path.resolve())
+        with _LOCAL_LOCK:
+            held = _LOCAL.get(key)
+            if held is not None:
+                held[1] += 1                  # 同进程已在用，共享句柄
+                self._fh = held[0]
+                self._key = key
+                self._slot = held[2]
+                return
+        fh = _open_rw(self._lock_path)
+        # 从自己的 pid 开始往后找空槽；全满说明要么恢复正在持整段，要么
+        # 真有 SLOTS 个写者——两种都不该放行。
+        start = os.getpid() % SLOTS
+        for i in range(SLOTS):
+            slot = (start + i) % SLOTS
+            if _win_try_lock(fh, slot, 1):
+                with _LOCAL_LOCK:
+                    _LOCAL[key] = [fh, 1, slot]
+                self._fh = fh
+                self._key = key
+                self._slot = slot
+                return
+        fh.close()
+        raise LeaseError(
+            "数据库正在被恢复，或同时使用的实例过多，暂时不能打开（"
+            + str(self._lock_path) + "）。请稍后重试。")
+
+    # ------------------------------------------------------------------
     def release(self) -> None:
         fh, self._fh = self._fh, None
         if fh is None:
             return
-        if os.name == "nt":                  # pragma: no cover - 仅 Windows
-            key, self._key = self._key, None
-            if key is None:
-                return
-            with _guard:
-                held = _win_leases.get(key)
+        key, self._key = self._key, None
+        slot, self._slot = self._slot, None
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            with _LOCAL_LOCK:
+                held = _LOCAL.get(key)
                 if held is None or held[0] is not fh:
                     return
                 held[1] -= 1
                 if held[1] > 0:
-                    # 同进程还有别的实例在用，锁不能放。
-                    return
-                _win_leases.pop(key, None)
-            try:
-                import msvcrt
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-            try:
-                fh.close()
-            except OSError:
-                pass
-            # 租约文件是「一个进程一个」，退出时要清掉，否则恢复端只能在
-            # 试探锁时才知道它是残留。
-            try:
-                os.unlink(fh.name)
-            except OSError:
-                pass
-            return
-        try:
-            import fcntl
-            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
+                    return                    # 同进程还有实例在用，锁不能放
+                _LOCAL.pop(key, None)
+            _win_unlock(fh, slot, 1)
+        else:
+            _posix_unlock(fh)
         try:
             fh.close()
         except OSError:
             pass
+        # 绝不删除锁文件：unlink 之后新来的实例会在**新的 inode** 上加锁，
+        # 而老实例还锁着旧 inode，两边各用各的锁，互斥就此失效。
+        # （rc7 一度这么写过，tests.test_v011_rc6 里「另开实例阻止恢复」
+        # 当场失败，就是这个原因。）
 
-
-def _probe_other_writers(db_path: Path) -> list:
-    """Windows：列出还活着的写者租约文件。"""
-    p = Path(db_path)
-    alive: list = []
-    for f in p.parent.glob(p.name + ".access.*.lock"):        # pragma: no cover
+    def __del__(self):                            # pragma: no cover - 兜底
         try:
-            fh = open(f, "a+b")
-            try:
-                fh.seek(0)
-                import msvcrt
-                try:
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError:
-                    alive.append(f.name)
-                else:
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-            finally:
-                fh.close()
-        except OSError:
-            alive.append(f.name)
-    return alive
+            self.release()
+        except Exception:
+            pass
 
 
 @contextlib.contextmanager
-def exclusive_access(db_path: Path, timeout: float = 0.0):
-    """恢复期间独占访问：有活着的写者就立即失败，绝不「先替换后打架」。"""
-    target = Path(db_path).with_name(Path(db_path).name + ".access.lock")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(target, "a+b")
-    got = False
-    try:
-        if os.name == "nt":                  # pragma: no cover - 仅 Windows
-            others = _probe_other_writers(db_path)
-            if others:
-                raise LeaseError(
-                    "还有进程在用这个数据库（" + ", ".join(others) +
-                    "），拒绝替换。请先关闭 GUI / 停掉 headless 服务。")
-            try:
-                import msvcrt
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                got = True
-            except OSError:
-                raise LeaseError("另一个进程正在恢复这个数据库，请稍后重试") from None
+def exclusive_access(db_path: Path, timeout: float = DEFAULT_RESTORE_TIMEOUT):
+    """恢复期间独占访问：还有写者就失败，绝不「先替换后打架」。
+
+    两道锁各管一件事，顺序固定：
+
+    1. restore_gate 排他 —— 只用来区分「另一个恢复在跑」和「有写者在用」，
+       给的是能看懂的报错，不是正确性来源。
+    2. 访问锁排他 —— 正确性在这里。它与写者的共享锁（POSIX LOCK_SH /
+       Windows 槽位）是同一个内核对象，所以不存在「检查完到上锁之间」的窗口。
+    """
+    p = Path(db_path)
+    gate_path = restore_gate_path(p)
+    lock_path = access_lock_path(p)
+
+    gate = _open_rw(gate_path)
+    if os.name == "nt":                           # pragma: no cover - 仅 Windows
+        if not _win_try_lock(gate, 0, 1):
+            gate.close()
+            raise LeaseError("另一个进程正在恢复这个数据库，请稍后重试")
+    else:
+        if not _posix_flock(gate, exclusive=True):
+            gate.close()
+            raise LeaseError("另一个进程正在恢复这个数据库，请稍后重试")
+
+    fh = _open_rw(lock_path)
+    deadline = time.monotonic() + max(0.0, timeout)
+    ok = False
+    while True:
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            ok = _win_try_lock(fh, 0, SLOTS)
         else:
-            import fcntl
-            try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                got = True
-            except OSError:
-                raise LeaseError(
-                    "还有进程在用这个数据库（写者租约仍在生效），拒绝替换。"
-                    "请先关闭 GUI / 停掉 headless 服务。") from None
+            ok = _posix_flock(fh, exclusive=True)
+        if ok or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+
+    if not ok:
+        fh.close()
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            _win_unlock(gate, 0, 1)
+        else:
+            _posix_unlock(gate)
+        gate.close()
+        raise LeaseError(
+            "还有进程在用这个数据库，拒绝替换。请先关闭 GUI / 停掉 headless 服务。")
+
+    try:
         yield
     finally:
-        if got:
-            try:
-                if os.name != "nt":
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-                else:                        # pragma: no cover - 仅 Windows
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            _win_unlock(fh, 0, SLOTS)
+        else:
+            _posix_unlock(fh)
         try:
             fh.close()
         except OSError:
             pass
+        if os.name == "nt":                       # pragma: no cover - 仅 Windows
+            _win_unlock(gate, 0, 1)
+        else:
+            _posix_unlock(gate)
+        try:
+            gate.close()
+        except OSError:
+            pass
+        # 同样的理由不删 gate 文件：删了就等于把互斥换成「看谁先创建」。

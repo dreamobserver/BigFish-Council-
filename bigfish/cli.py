@@ -140,12 +140,40 @@ def main(argv: list[str] | None = None) -> int:
     else:
         s, db, council = build(a.data_dir)
 
+    try:
+        return _dispatch(a, s, db, council)
+    finally:
+        _close_quietly(db)
+
+
+def _close_quietly(db) -> None:
+    """退出前收掉数据库（BFC-05）。
+
+    以前只有 restore 分支关库，其他分支靠进程退出来释放句柄。这在 Windows 上
+    会让紧接着调用本 CLI 的脚本（移动/删除/再次恢复）撞上文件占用；库没关还
+    可能留下没 checkpoint 的 WAL。统一在 main() 的 finally 里关。
+    """
+    try:
+        db.close()
+    except Exception:                # pragma: no cover - 关闭失败不掩盖原异常
+        pass
+
+
+def _dispatch(a, s, db, council) -> int:
+    """真正的命令分发。所有分支共用 main() 的关库逻辑。"""
     if a.cmd == "init":
         print(f"数据目录: {s.data_dir}\n数据库: {s.db_path}\n密钥: {s.key_path}")
         return 0
     if a.cmd == "allowed-ports":
-        from .config import PORT_ROLES
-        dump({k: {"port": v[0], "role": v[1]} for k, v in PORT_ROLES.items()})
+        from .config import PORT_RESERVED, PORT_ROLES
+        dump({
+            "implemented": {k: {"port": v[0], "role": v[1]}
+                            for k, v in PORT_ROLES.items()},
+            # BFC-06：预留端口也要打出来，否则看 allowed-ports 的人会以为
+            # 3099-3101 是空着的，随手拿去用。
+            "reserved": {str(p): {"name": v[0], "note": v[1]}
+                         for p, v in sorted(PORT_RESERVED.items())},
+        })
         return 0
     if a.cmd == "serve":
         from .server import BindError, serve
@@ -220,17 +248,8 @@ def main(argv: list[str] | None = None) -> int:
         dump(inspect_bundle(a.path))
         return 0
     if a.cmd == "restore":
-        # 恢复分支必须自己关库：进程虽然马上退出，但 Windows 上「进程未退出前
-        # 文件仍被占用」会让调用方（脚本 / 测试 / 运维）紧接着的移动、删除失败。
-        # 其他分支是短命只读操作，交给进程退出即可；恢复动的是库文件本身。
-        try:
-            dump(council.restore_from_bundle(a.path))
-            return 0
-        finally:
-            try:
-                db.close()
-            except Exception:            # pragma: no cover - 关闭失败不掩盖原异常
-                pass
+        dump(council.restore_from_bundle(a.path))
+        return 0
     if a.cmd == "reenable":
         dump(council.reenable_executor(a.exec_id))
         return 0

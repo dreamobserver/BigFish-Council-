@@ -16,6 +16,7 @@ v0.1.1-rc3 修复：
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -117,6 +118,60 @@ class _BodyTooLarge(Exception):
     pass
 
 
+class LoopbackGuardMiddleware:
+    """连接级回环闸门（BFC-03）。
+
+    审计指出：create_app() 只返回 app，第三方仍可用
+    uvicorn.run(create_app(...), host="0.0.0.0") 绕开 check_bind_host()。
+    与其在文档里声明「别这么用」，不如让 app 自己对每一根连接再判一次——
+    这样端口就算被误绑到全网卡，外部请求也拿不到任何数据。
+
+    判据用两个都由传输层填充、客户端伪造不了的字段：
+    - scope["client"][0]：对端 IP，局域网/公网来客必然不是回环。
+    - scope["server"][0]：本端 IP（绑 0.0.0.0 时是**该连接实际落到的本地地址**），
+      外部来客连上来时这里是网卡地址，同样不是回环。
+
+    两者任一非回环就 403。TestClient 走进程内调用，对端写作 testclient，
+    按受信处理（它不经过任何 socket，攻击者无法从外部获得这个值）。
+    """
+
+    # TestClient 的 scope 写作 client=("testclient", 50000) / server=("testserver", 80)，
+    # 两个都是进程内常量，不经过 socket。
+    TRUSTED_PEERS = frozenset({"testclient", "testserver"})
+
+    def __init__(self, app):
+        self.app = app
+
+    @classmethod
+    def _ok(cls, addr) -> bool:
+        if not addr:
+            return True                       # 无对端信息（unix socket）交由上游
+        if addr in cls.TRUSTED_PEERS:
+            return True
+        return is_loopback_host(addr)
+
+    @staticmethod
+    async def _reject(send, addr) -> None:
+        body = json.dumps({
+            "ok": False,
+            "error": f"本服务只接受回环访问，当前连接来自 {addr or 'unknown'}",
+        }, ensure_ascii=False).encode()
+        await send({"type": "http.response.start", "status": 403,
+                    "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            peer = (scope.get("client") or (None,))[0]
+            local = (scope.get("server") or (None,))[0]
+            for addr in (peer, local):
+                if not self._ok(addr):
+                    await self._reject(send, addr)
+                    return
+        await self.app(scope, receive, send)
+
+
 class ClaimBody(BaseModel):
     task_id: str = Field(max_length=128)
     idempotency_key: str | None = Field(default=None, max_length=200)
@@ -159,15 +214,15 @@ def _bearer(authorization: str | None) -> str:
 
 
 def create_app(council: Council, watchdog_interval: float | None = None) -> FastAPI:
-    """组装 ASGI app。**本函数不负责监听地址**（rc6 F-08）。
+    """组装 ASGI app。**本函数不校验监听地址**（供测试/进程内挂载）。
 
-    它只返回 app，不 bind socket。想真正对外提供服务，必须走 serve()——
-    serve() 里有 check_bind_host() 这道回环闸门。直接
-    `uvicorn.run(create_app(...), host="0.0.0.0")` 会绕过闸门，这不是官方入口，
-    也不被支持：部署只用 serve() / GUI / `python -m bigfish`。
+    它只返回 app 对象，不 bind socket。要对外提供服务请用
+    create_production_app()（带监听地址闸门）或 serve()。
 
-    为什么要写这么长一段：审计指出「四个入口都校验了」不等于「app 本身安全」，
-    与其假装封死，不如把边界说清楚，让后来的人别再自己 uvicorn.run。
+    BFC-03 的两道防线是分层的：
+    1. create_production_app()/serve()/gui.run()/cli serve 在**启动前**拒掉非回环；
+    2. LoopbackGuardMiddleware 在**每根连接**上再判一次，所以即使有人硬拿
+       本函数配 uvicorn.run(host="0.0.0.0")，外部请求也只能拿到 403。
     """
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -185,6 +240,8 @@ def create_app(council: Council, watchdog_interval: float | None = None) -> Fast
     app = FastAPI(title="BigFish Council Local API", version=__version__, docs_url=None,
                   redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(BodyLimitMiddleware, limit=MAX_BODY_BYTES)
+    # BFC-03：连接级回环闸门，堵住「绕过 serve() 直接 uvicorn.run」这条路。
+    app.add_middleware(LoopbackGuardMiddleware)
 
     def executor(authorization: str | None = Header(default=None)) -> dict:
         token = _bearer(authorization)
@@ -372,10 +429,17 @@ def _validate_args(spec: dict, args: dict) -> str | None:
         if extra:
             return "不支持的参数：" + ", ".join(extra)
     for k, v in args.items():
-        want = (props.get(k) or {}).get("type")
+        spec_k = props.get(k) or {}
+        want = spec_k.get("type")
         if want == "string" and not isinstance(v, str):
             return f"参数 {k} 必须是字符串"
-        enum = (props.get(k) or {}).get("enum")
+        # BFC-02：自由文本必须有字段级上限。MCP 请求整体虽然受 MAX_BODY_BYTES
+        # 限制，但一个字段就能独占几乎整个请求体，在 JSON 解析和业务处理之前
+        # 就已经进内存了。REST 侧 Pydantic 早就有 max_length，这里补上同一道。
+        limit = spec_k.get("maxLength")
+        if limit is not None and isinstance(v, str) and len(v) > limit:
+            return f"参数 {k} 超过长度上限 {limit} 字符（实际 {len(v)}）"
+        enum = spec_k.get("enum")
         if enum is not None and v not in enum:
             return f"参数 {k} 只能是 {' / '.join(map(str, enum))}"
     return None
@@ -441,7 +505,7 @@ def tool_specs() -> dict[str, dict]:
                 "properties": {
                     "ticket": {"type": "string"},
                     "status": {"type": "string", "enum": ["running", "paused"]},
-                    "detail": {"type": "string"},
+                    "detail": {"type": "string", "maxLength": MAX_TEXT_FIELD},
                     "idempotency_key": {"type": "string"},
                 },
                 "required": ["ticket"],
@@ -458,10 +522,10 @@ def tool_specs() -> dict[str, dict]:
                     "ticket": {"type": "string"},
                     "status": {"type": "string",
                                "enum": ["completed", "failed", "blocked", "cancelled"]},
-                    "log": {"type": "string"},
-                    "diff": {"type": "string"},
-                    "tests": {"type": "string"},
-                    "note": {"type": "string"},
+                    "log": {"type": "string", "maxLength": MAX_TEXT_FIELD},
+                    "diff": {"type": "string", "maxLength": MAX_TEXT_FIELD},
+                    "tests": {"type": "string", "maxLength": MAX_TEXT_FIELD},
+                    "note": {"type": "string", "maxLength": MAX_TEXT_FIELD},
                     "idempotency_key": {"type": "string"},
                 },
                 "required": ["ticket", "status"],
@@ -532,6 +596,17 @@ def dispatch_tool(council: Council, ex: dict, name: str, args: dict) -> Any:
     raise CouncilError(f"未知工具：{name}")
 
 
+def create_production_app(council: Council, host: str | None = None,
+                            watchdog_interval: float | None = None) -> tuple[FastAPI, str]:
+    """带监听闸门的 app 工厂（BFC-03 的官方入口）。
+
+    与 create_app() 的唯一区别：host 先过 check_bind_host()，非回环直接抛
+    BindError。这样「谁调这个工厂，谁就不可能拿到一个准备绑 0.0.0.0 的 app」。
+    返回的 tuple 第二项是校验后的 host，避免调用方各写一遍归一化。
+    """
+    return create_app(council, watchdog_interval=watchdog_interval), check_bind_host(host)
+
+
 def serve(council: Council, host: str = DEFAULT_API_HOST, port: int = DEFAULT_API_PORT,
           watchdog_interval: float | None = 10.0):
     """阻塞启动（供 CLI / 后台线程使用）。
@@ -540,6 +615,6 @@ def serve(council: Council, host: str = DEFAULT_API_HOST, port: int = DEFAULT_AP
     不存在「换个入口就能绑 0.0.0.0」的绕过（P1-3.1）。
     """
     import uvicorn
-    host = check_bind_host(host)
-    app = create_app(council, watchdog_interval=watchdog_interval)
+    app, host = create_production_app(
+        council, host, watchdog_interval=watchdog_interval)
     uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)

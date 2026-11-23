@@ -132,8 +132,16 @@ def export_bundle(db: Database, path: str | Path) -> Path:
             "db_size": snap.stat().st_size,
             "table_counts": counts,
             "includes_key_file": False,
-            "contains_plaintext_credentials": False,
-            "contains_credential_hashes": True,
+            # BFC-04：布尔名叫 contains_plaintext_credentials 时，写 False 等于
+            # 对外宣称「我检查过了、保证没有」。这不能由「白名单里没有 token 列」
+            # 推出来，属于过强声明。改成枚举，只描述**实际观测到的事实**：
+            #   none                          —— 明确不含任何凭据形态
+            #   hashes-only                   —— 只含不可逆哈希，无明文（本包）
+            #   pattern-scrubbed-unverified   —— 按已知模式脱敏过，未证明干净（审计包）
+            "credential_status": "hashes-only",
+            "credential_detail": (
+                "含 executors.token_hash 与 tickets.token_hash（SHA-256，不可逆）；"
+                "不含明文 token、不含执行票原文、不含密钥文件。"),
             "handling": "敏感：含 token 哈希与票哈希，只在本机保存或加密存放，不得外发。",
             "note": "执行票由本地密钥派生，密钥文件不在包内；恢复后密钥轮换，旧票全部失效。",
         }
@@ -207,10 +215,10 @@ def export_audit_bundle(db: Database, path: str | Path) -> Path:
                 "dropped_columns": dropped,
                 "string_scrub": "bfc_*/Bearer/sk-*/gh*_*/AKIA*/private-key",
             },
-            # F-07：不能把「没命中我们写的那几条正则」说成「保证没有凭据」。
-            # 这里如实声明扫描范围，并强制标 manual_review_required。
-            "contains_plaintext_credentials": False,
-            "contains_credential_hashes": False,
+            # F-07 / BFC-04：不能把「没命中我们写的那几条正则」说成「保证没有凭据」。
+            # 原先这里写 contains_plaintext_credentials: False，布尔语义天然像承诺；
+            # 改成枚举后只陈述「按模式脱敏过、未验证干净」这一件事。
+            "credential_status": "pattern-scrubbed-unverified",
             "credential_scan": {
                 "mode": "pattern-based",
                 "patterns": list(SCRUB_KINDS),

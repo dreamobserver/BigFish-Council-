@@ -24,7 +24,6 @@ from .backup import export_bundle, inspect_bundle
 from .config import DEFAULT_API_PORT, DEFAULT_PROXY_PORT, Settings
 from .core import Council, CouncilError
 from .runtime import open_council
-from .server import create_app
 
 DARK_QSS = """
 QWidget { background: #16181d; color: #e6e8ee; font-family: "Microsoft YaHei UI","Segoe UI"; font-size: 13px; }
@@ -96,18 +95,19 @@ class ApiServer(QObject):
 
     def start(self):
         import uvicorn
-        from .server import BindError, check_bind_host
-        # 纵深防御（SECURITY-REVIEW rc4 R10）：直接构造 MainWindow 的脚本/测试绕过了
-        # gui.run() 的闸门，所以这里再校验一次。--host 只允许回环。
-        try:
-            self.host = check_bind_host(self.host)
-        except BindError as exc:
-            self.started.emit(False, f"拒绝启动：{exc}")
-            return
+        from .server import BindError, create_production_app
+        # 纵深防御（SECURITY-REVIEW rc4 R10 / BFC-03）：直接构造 MainWindow 的脚本/
+        # 测试绕过了 gui.run() 的闸门，所以这里再校验一次。闸门现在由
+        # create_production_app() 统一执行，GUI 不再自己写一套判断。
         if self.thread is not None and self.thread.is_alive():
             return
         # lifespan 必须开启：看门狗挂在 FastAPI 生命周期上，不依赖 GUI 存活（P1-1）
-        app = create_app(self.council, watchdog_interval=self.watchdog_interval)
+        try:
+            app, self.host = create_production_app(
+                self.council, self.host, watchdog_interval=self.watchdog_interval)
+        except BindError as exc:
+            self.started.emit(False, f"拒绝启动：{exc}")
+            return
         config = uvicorn.Config(app, host=self.host, port=self.port, log_level="warning",
                                 access_log=False, lifespan="on")
         self._server = uvicorn.Server(config)

@@ -10,7 +10,12 @@ REVIEWER_GEMINI = "reviewer_gemini"
 HUMAN_OWNER = "human_owner"
 EXECUTOR_DSH = "executor_dsh"
 
-ALL_ROLES = (ARCHITECT_GPT, REVIEWER_GEMINI, HUMAN_OWNER, EXECUTOR_DSH)
+# BFC-RC7: mobile end (remote chat roaming / read-only watching). Lower than executor:
+# cannot claim, heartbeat, or submit. Naming deliberately avoids executor.
+MOBILE_VIEWER = "mobile_viewer"
+
+ALL_ROLES = (ARCHITECT_GPT, REVIEWER_GEMINI, HUMAN_OWNER, EXECUTOR_DSH,
+             MOBILE_VIEWER)
 # 兼容旧名字（v0.1.0 起的测试与文档用的是 ROLES）
 ROLES = ALL_ROLES
 
@@ -19,6 +24,7 @@ ROLE_LABELS = {
     REVIEWER_GEMINI: "审查（Gemini）",
     HUMAN_OWNER: "人类所有者",
     EXECUTOR_DSH: "执行器（VPS DSH）",
+    MOBILE_VIEWER: "手机端（只读）",
 }
 
 # 角色 -> 绑定的模型；None 表示不涉及模型身份
@@ -35,14 +41,18 @@ PERMISSIONS = {
         "idempotency.purge", "ticket.issue",
     },
     EXECUTOR_DSH: {"task.claim", "run.heartbeat", "run.submit", "task.read.own"},
+    # 只读 + 可留言。刻意不含 task.claim / run.* / approve / backup.*：
+    # 手机丢了也不至于能把任务领走或把库导出去。
+    MOBILE_VIEWER: {"task.read", "event.read", "review.create"},
 }
 
 # 数据库 executors.role -> 业务角色。
-# 注意：未知 db_role 会走 role_for_db_row() 末尾的兜底，而兜底是 EXECUTOR_DSH。
-# 所以将来加手机端（mobile）角色时，必须在这里显式登记，否则手机连上来会拿到
-# 执行器权限——那是最不该给的。现在显式登记 executor/admin/reviewer 三类；
-# mobile 尚未实现，故意不登记，并在构造时拒绝未知 role（见 register_executor）。
-_DB_ROLE_MAP = {"executor": EXECUTOR_DSH, "reviewer": None, "admin": HUMAN_OWNER}
+# rc7：mobile 已显式登记为 MOBILE_VIEWER。仍然保留这条警告——未知 db_role
+# 会落到 EXECUTOR_DSH，即「没登记 = 拿到执行器权限」。新增角色时必须同时改
+# ALL_ROLES / PERMISSIONS / _DB_ROLE_MAP 三处，缺一处就是提权。
+# register_executor() 的白名单是第二道，只接受 DB_ROLES 里的值。
+_DB_ROLE_MAP = {"executor": EXECUTOR_DSH, "reviewer": None, "admin": HUMAN_OWNER,
+                "mobile": MOBILE_VIEWER}
 
 # 允许出现在 executors.role 列里的取值（白名单，注册时校验）
 DB_ROLES = frozenset(_DB_ROLE_MAP)
@@ -71,7 +81,8 @@ def role_for_db_row(db_role: str, name: str = "", model: str | None = None) -> s
     model 为空时按旧的名称规则推断，仅用于兼容 v0.1.1-rc2 之前的数据。
     """
     base = _DB_ROLE_MAP.get(db_role)
-    if base is not None:
+    # base 可能是 None（reviewer 要看 model），所以不能只判 base
+    if db_role in _DB_ROLE_MAP and base is not None:
         return base
     if db_role == "reviewer":
         m = (model or "").strip().lower()

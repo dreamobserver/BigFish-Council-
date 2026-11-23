@@ -40,10 +40,35 @@ class Base(unittest.TestCase):
 class TestRoleTable(unittest.TestCase):
     """角色权限表本身的行为。"""
 
-    def test_four_canonical_roles(self):
-        self.assertEqual(len(R.ROLES), 4)
-        self.assertIn(R.HUMAN_OWNER, R.ROLES)
-        self.assertIn(R.EXECUTOR_DSH, R.ROLES)
+    def test_canonical_roles(self):
+        """rc7 起多了一个只读的 MOBILE_VIEWER（见 roles.py 注释）。
+
+        这里不再硬编码 4，而是断言四个核心角色都在，且新增角色不会
+        悄悄继承执行器权限。
+        """
+        for role in (R.ARCHITECT_GPT, R.REVIEWER_GEMINI, R.HUMAN_OWNER,
+                     R.EXECUTOR_DSH):
+            self.assertIn(role, R.ROLES)
+        self.assertIn(R.MOBILE_VIEWER, R.ROLES)
+        self.assertEqual(len(R.ROLES), len(set(R.ALL_ROLES)))
+
+    def test_mobile_viewer_cannot_execute(self):
+        """手机端只能看和留言，不能领任务/心跳/提交/审批/导出。
+
+        这几条是 rc7 的硬约束：手机丢了也不能变成一台执行器。
+        """
+        for p in ("task.claim", "run.heartbeat", "run.submit", "approve",
+                  "backup.export", "backup.restore", "executor.manage",
+                  "ticket.issue", "task.cancel"):
+            self.assertFalse(R.can(R.MOBILE_VIEWER, p), f"手机端不该有 {p}")
+        for p in ("task.read", "event.read", "review.create"):
+            self.assertTrue(R.can(R.MOBILE_VIEWER, p), f"手机端该有 {p}")
+
+    def test_mobile_db_role_maps_to_viewer_not_executor(self):
+        """未登记的 db_role 会被兜底成执行器；mobile 必须显式映射到只读。"""
+        self.assertEqual(R.role_for_db_row("mobile"), R.MOBILE_VIEWER)
+        self.assertNotEqual(R.role_for_db_row("mobile"), R.EXECUTOR_DSH)
+        self.assertIn("mobile", R.DB_ROLES)
 
     def test_only_human_can_approve(self):
         self.assertTrue(R.can(R.HUMAN_OWNER, "approve"))

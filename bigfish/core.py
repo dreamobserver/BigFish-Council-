@@ -158,8 +158,10 @@ class Council:
         不再靠 name 字符串里的 gpt/gemini 猜（P2-3）。model 省略时按旧规则从
         name 推断，仅用于兼容既有部署。
         """
-        if role not in ("executor", "reviewer", "admin"):
-            raise CouncilError("role 只能是 executor / reviewer / admin")
+        # 白名单与 roles.DB_ROLES 同源：放行 mobile 是为了让手机端身份能被创建，
+        # role_for_db_row() 会把它映射成 MOBILE_VIEWER（只读），不会变成执行器。
+        if role not in R.DB_ROLES:
+            raise CouncilError("role 只能是 " + " / ".join(sorted(R.DB_ROLES)))
         if role == "reviewer":
             if model is None:
                 low = (name or "").lower()
@@ -168,7 +170,8 @@ class Council:
                 raise CouncilError("审查身份的 model 只能是 gpt 或 gemini")
         else:
             model = None
-        prefix = {"executor": "bfc_ex_", "reviewer": "bfc_rv_", "admin": "bfc_ad_"}[role]
+        prefix = {"executor": "bfc_ex_", "reviewer": "bfc_rv_", "admin": "bfc_ad_",
+                  "mobile": "bfc_mb_"}[role]
         ex_id = role + "-" + uuid.uuid4().hex[:8]
         token = new_token(prefix)
         self.db.execute(

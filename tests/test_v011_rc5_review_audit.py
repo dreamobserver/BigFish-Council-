@@ -225,8 +225,12 @@ class TestAuditBundleAllowlist(Base):
             m = json.loads(zf.read("manifest.json"))
         self.assertEqual(m["redaction"]["policy"], "allowlist")
         self.assertEqual(set(m["redaction"]["allowed_columns"]), set(AUDIT_TABLES))
-        self.assertFalse(m["contains_plaintext_credentials"])
-        self.assertFalse(m["contains_credential_hashes"])
+        # rc7 BFC-04：manifest 不再用「contains_plaintext_credentials: false」
+        # 这种布尔承诺（它读起来像「我保证没有」，但白名单只能证明「没导出那一列」）。
+        # 改成枚举后，审计包必须自报「按模式脱敏过、未验证干净」。
+        self.assertEqual(m["credential_status"], "pattern-scrubbed-unverified")
+        self.assertNotIn("contains_plaintext_credentials", m)
+        self.assertTrue(m["credential_scan"]["manual_review_required"])
 
     def test_dropped_columns_reported_when_present(self):
         """库里确实有被跳过的列时，manifest 要说清楚跳了哪些，不能静默。"""
