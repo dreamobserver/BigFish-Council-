@@ -13,8 +13,8 @@
 
 | 模块 | 判断 | 依据 | 处理方向 |
 | --- | --- | --- | --- |
-| MCP HTTP/JSON-RPC | **是，建议整改** | `requirements.txt` 声明官方 `mcp` SDK，但 `bigfish/server.py` 从 `initialize`、`ping`、`tools/list`、`tools/call` 到错误码都手写了一套协议层，源码没有导入 `mcp` | 保留 `dispatch_tool()`、权限表和业务校验，把传输层换成官方 SDK 适配器。若 SDK 无法直接满足 Bearer 与回环部署，再保留一个很薄的兼容适配层，并删除未使用的 SDK 依赖 |
-| SSE/长连接 | **未造轮子，当前是未实现** | `sse-starlette` 与 `httpx-sse` 在锁文件中，但代码没有 SSE endpoint，3100 仍标为“计划中，未实现” | 下一阶段实现时直接使用 `sse-starlette`，不要再手写事件帧、断线重连和 keep-alive |
+| MCP HTTP/JSON-RPC | **是，建议整改** | `requirements.txt:7-8` 声明官方 `mcp` SDK，但 `bigfish/server.py:319-404,452-623` 从 `initialize`、`ping`、`tools/list`、`tools/call` 到错误码都手写了一套协议层，源码没有导入 `mcp` | 保留 `dispatch_tool()`、权限表和业务校验，把传输层换成官方 SDK 适配器。若 SDK 无法直接满足 Bearer 与回环部署，再保留一个很薄的兼容适配层，并删除未使用的 SDK 依赖 |
+| SSE/长连接 | **未造轮子，当前是未实现** | `requirements.lock:20,48` 有 `httpx-sse` 与 `sse-starlette`，但代码没有 SSE endpoint，`bigfish/config.py:37-40` 把 3100 标为“计划中，未实现” | 下一阶段实现时直接使用 `sse-starlette`，不要再手写事件帧、断线重连和 keep-alive |
 | Windows/ POSIX 数据库租约 | **不是简单造轮子** | 64 字节槽位模型需要“多写者共享、恢复独占、同进程句柄复用”的组合语义，普通单锁库不能直接替代 | 保留当前协议。可单独评估 `portalocker` 等库，但必须保留跨进程恢复、同进程引用计数和 100 轮并发回归 |
 | 回环与请求体中间件 | **不是造轮子** | 这是项目自己的安全边界，尤其要覆盖 chunked body、实际连接地址和本地部署误绑 | 保留，补充真实 uvicorn socket 测试 |
 | ReceiptLog、状态机、审批、恢复清理 | **不是造轮子** | 这些是本项目的审计证据和业务语义 | 保留领域实现，继续用 SQLite 事务与现有审计表 |
@@ -60,7 +60,7 @@ git push origin release/rc8-linear v0.1.1-rc8-linear
 
 ### 【一般】未知 reviewer model 仍会失败开放到 Gemini
 
-`bigfish/roles.py` 已经把未知 `db_role` 映射到 `DENIED_ROLE`，但 `db_role="reviewer"` 且 `model` 不是 `gpt/gemini` 时，会继续按名称猜测，名称没有 `gpt` 时默认返回 `REVIEWER_GEMINI`。脏数据因此仍能得到审查权限。
+`bigfish/roles.py:96-104` 已经把未知 `db_role` 映射到 `DENIED_ROLE`，但 `db_role="reviewer"` 且 `model` 不是 `gpt/gemini` 时，会继续按名称猜测，名称没有 `gpt` 时默认返回 `REVIEWER_GEMINI`。脏数据因此仍能得到审查权限。
 
 建议改为无法确认模型就拒绝。
 
@@ -81,7 +81,7 @@ if db_role == "reviewer":
 
 ### 【一般】移动端只有角色和端口预留，没有可调用接口
 
-`MOBILE_VIEWER` 已存在，权限也只读，但没有移动 REST 路由、SSE 路由、配对流程、分页接口或 Android 项目。3099、3100、3101 都仍是 `PORT_RESERVED`，Release 也没有 apk。当前状态应写成“接口编号和权限模型预留”，不能写成“安卓端初步开发完成”。
+`MOBILE_VIEWER` 在 `bigfish/roles.py:13-15,50-53` 已存在，权限也只读，但没有移动 REST 路由、SSE 路由、配对流程、分页接口或 Android 项目。3099、3100、3101 在 `bigfish/config.py:37-40` 都仍是 `PORT_RESERVED`，Release 也没有 apk。当前状态应写成“接口编号和权限模型预留”，不能写成“安卓端初步开发完成”。
 
 推荐的小型架构如下。
 
@@ -116,7 +116,7 @@ async def mobile_events(mobile=Depends(mobile_identity)):
 
 ### 【一般】发布文档的测试数量互相矛盾
 
-`docs/DELIVERY-v0.1.1-rc8.md` 写 318 项，`docs/TEST-REPORT-v0.1.1-rc8.md`、tag 说明和 README 顶部写 322 项，README 后半段仍残留 295 项和“期望 Ran 295 tests”。这会影响发布签字和后续回归判断。
+`docs/DELIVERY-v0.1.1-rc8.md:9` 写 318 项，`docs/TEST-REPORT-v0.1.1-rc8.md:9`、tag 说明和 `README.md:18-19` 写 322 项，`README.md:303,363` 后半段仍残留 295 项和“期望 Ran 295 tests”。这会影响发布签字和后续回归判断。
 
 处理方式是把测试数量放入一个生成文件或 CI artifact，README 只引用该来源。至少应在 rc8 文档中统一为 322，并删除旧版 295 的执行指令。
 
