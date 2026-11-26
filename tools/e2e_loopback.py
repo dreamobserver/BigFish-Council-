@@ -91,8 +91,15 @@ def main() -> int:
 
     print("== 4. 经跳板走 MCP 领取 ==")
     ex = council.register_executor("e2e-loopback", "executor")
-    st, init = rpc(a.url, ex["token"], "initialize")
-    check("initialize 成功", st == 200 and "result" in init)
+    # rc9：协议层换成官方 SDK 后，initialize 按规范必须带 protocolVersion /
+    # capabilities / clientInfo，缺了会被服务端以 -32602 拒绝（旧手写版不校验
+    # params，所以这里以前传空也能过）。客户端本来就该带这些字段。
+    st, init = rpc(a.url, ex["token"], "initialize", {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {},
+        "clientInfo": {"name": "e2e-loopback", "version": "1.0"},
+    })
+    check("initialize 成功", st == 200 and "result" in init, str(st))
     _, tl = rpc(a.url, ex["token"], "tools/list")
     names = [x["name"] for x in tl["result"]["tools"]]
     check("暴露面只有 5 个执行器工具", len(names) == 5, ",".join(names))

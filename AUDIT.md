@@ -1,6 +1,6 @@
 # AUDIT.md — 给 GPT / Gemini 的审计入口
 
-> 版本：`0.1.1-rc8`　最后更新：2026-11-23
+> 版本：`0.1.1-rc9`　最后更新：2026-11-26
 > 这份文件是给你（外部审计方）的入口。它告诉你项目是什么、现在到哪一步、
 > 哪些**已经实测跑过**、哪些**明确没做**、以及作者自己最怀疑哪些地方。
 > 请把「已验证」当成「有命令可复现」，把「未验证」当成「作者也没底」。
@@ -45,15 +45,16 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | `0.1.1-rc8`（`bigfish/__init__.py:6`） |
+| 版本 | `0.1.1-rc9`（`bigfish/__init__.py:6`） |
 | 定性 | **发布候选（RC），不是生产版** |
 | 数据库 schema | v4（`bigfish/db.py:24 SCHEMA_VERSION = 4`、`:25 BACKUP_FORMAT_VERSION = 4`） |
+| rc8 → rc9 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc8 的库直接能用，不需要迁移也不需要回滚 |
 | rc7 → rc8 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc7 的库直接能用，不需要迁移也不需要回滚 |
 | rc6 → rc7 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4，没有新增 `MIGRATIONS` 项，rc6 的库直接能用，不需要迁移也不需要回滚 |
 | rc5 → rc6 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc5 的库直接能用，不需要迁移，也不需要回滚（rc4 → rc5 那次加的 `executors.disabled_reason` 列 + `idx_executors_enabled` 索引、以及 BACKUP_FORMAT_VERSION 3 → 4 都已是历史） |
-| 测试总数 | **322** 项 |
-| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **322 项全绿**（`Ran 322 tests in 148.492s`，`OK (skipped=1)`，退出码 0） |
-| 平台 B | Windows（GitHub Actions `windows-latest`，Python 3.11 与 3.13 各跑一遍）→ **两遍都是 322 项全绿**：py3.11 `Ran 322 tests in 183.951s`、py3.13 `Ran 322 tests in 197.687s`，均 `OK (skipped=1)`，退出码 0；唯一跳过的是 Windows 无 SIGINT 语义的 `test_graceful_shutdown_on_sigint`。CI 同时跑了 `tools/selfcheck.py`（16/16）与 `tools/gui_smoke.py`（9/9）。**这是第一次两个平台都把 322 项完整跑完**，不再是 294/295 拼起来的结果——第一次 CI（run `45170828326`）才推翻「Windows 跑不了全量」这个错误口径，并撞出 R8-02 / R8-03，见第 4.4 节与第 7 节 Q11 |
+| 测试总数 | **345** 项 |
+| 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **345 项全绿**（`Ran 345 tests in 175.583s`，`OK (skipped=1)`，退出码 0） |
+| 平台 B | Windows（GitHub Actions `windows-latest`，Python 3.11 与 3.13 各跑一遍）：**rc8 期已实测 322 项两遍全绿**（py3.11 `Ran 322 tests in 183.951s`、py3.13 `Ran 322 tests in 197.687s`，均 `OK (skipped=1)`）；**rc9 的 345 项待 CI 回填**——rc9 主要改 MCP 传输层（换官方 SDK），风险集中在协议层，必须有 Windows runner 的结果才算数，本文件写作时尚未推送。CI 同时跑 `tools/selfcheck.py`（16/16）与 `tools/gui_smoke.py`（9/9）。**rc8 那次 CI 第一次推翻「Windows 跑不了全量」这个错误口径**（第一次 CI run `45170828326` 的日志写着 `Ran 318 tests in 181.158s`），并撞出 R8-02 / R8-03，见第 4.4 节与第 7 节 Q11 |
 | 主语言 | Python 3（标准库 + FastAPI + PySide6） |
 | 许可证 | MIT |
 
@@ -79,6 +80,8 @@
 | `tests/test_v011_rc6.py` | 16 | 跨进程恢复租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
 | `tests/test_v011_rc7.py` | 28 | Codex 审计 BFC-01~08 各组 + 手机端只读角色（租约原子性 6 / MCP 字段上限 4 / 监听闸门 5 / manifest 枚举 3 / CLI 关库与端口 2 / 发布工程 3 / 手机角色 5） |
 | `tests/test_v011_rc8.py` | 27 | 第六轮硬化：Windows 同进程并发句柄 2 + 未知角色失败关闭 7 + 子进程编码独立性 2 + Windows ACL 匹配 6 + 控制台解码 6 + 控制台编码兜底 4 |
+| `tests/test_v011_rc9.py` | 15 | 未知 reviewer model 失败关闭 10（脏行拒绝 / 空名空 model 拒绝 / 双关键词拒绝 / 显式 model 仍工作 / 唯一名字仍推断 / 鉴权拒绝 / 任务不受影响 / 审计落库 / 审计不含令牌）+ 注册侧同源失败关闭 5 |
+| `tests/test_v011_rc9_socket.py` | 8 | 真 uvicorn + 官方 mcp SDK 客户端：协议协商 / 服务标识 / 工具集恰五件 / inputSchema 结构 / 完整闭环 / 幂等重放 / 业务失败 isError / 鉴权拒绝与越权 |
 
 v0.1.0 的原始 21 项（`test_core.py` + `test_api.py`）**一项没删、一项没放宽断言**。
 rc3 的 26 项、rc4 的 33 项、rc5 的 80 项、rc6 的 21 项都是新增，不是替换。
@@ -87,6 +90,8 @@ rc5 新增 7 个文件共 **80 项**（21 + 24 + 13 + 9 + 7 + 3 + 3），
 合计 162 → **244**。
 
 rc8 在这 295 之上又加了 **27 项 → 322**：新增 `tests/test_v011_rc8.py` **27 项**（R7-01 并发句柄 2 / R7-02 未知角色 7 / 子进程编码 2 / Windows ACL 匹配 6 / 控制台解码 6 / 控制台编码兜底 4）；另有一条既有测试（`test_v011_rc5_review_audit.py` 的心跳续租）改了采样时机，断言强度不变。**一项没删、一项没放宽断言。**
+
+rc9 在这 322 之上又加了 **23 项 → 345**：新增 `tests/test_v011_rc9.py` **15 项**（未知 reviewer model 失败关闭 10 + 注册侧同源失败关闭 5）与 `tests/test_v011_rc9_socket.py` **8 项**（真 uvicorn 进程 + 官方 mcp SDK 客户端走真实 socket）。**一项没删、一项没放宽断言。**唯一被改的既有断言在工具脚本 `tools/selfcheck.py` 里（「坏 Token 应返回 200」→「应返回 401」，方向变严），它不计入 345。
 
 rc7 在这 265 之上又加了 **30 项 → 295**：新增 `tests/test_v011_rc7.py` **28 项**（八条审计意见逐条对应 + 手机端角色 5 项 + 1 项跨进程租约），
 另有 2 项补进 `tests/test_v011_p2.py`（手机角色不能执行、db_role 映射不兜底成执行器）。
@@ -130,6 +135,24 @@ rc6 在这 244 之上又加了 **21 项 → 265**：新增 `tests/test_v011_rc6.
 | F-08 | P2 | `create_app` 不负责 bind | 补长 docstring 写明「本函数不 bind socket，部署必须走 `serve()`，`uvicorn.run(create_app(...), host="0.0.0.0")` 不被支持」；选择写清边界而不是假装封死，因为 `TestClient` 依赖它不绑定 |
 | F-09 | P2 | 自由文本请求没有体积上限 | `server.py` 加 `MAX_BODY_BYTES`（默认 8 MiB，`BFC_MAX_BODY_BYTES` 可覆盖）与 `MAX_TEXT_FIELD`（默认 4 MiB）；纯 ASGI 的 `BodyLimitMiddleware` 先看 content-length、没有就包 `receive()` 边收边数，超限回 413；字段级 `max_length` 超限回 422；2 项测试 |
 
+### rc9 改了什么（一句话版）
+
+起点是 Codex 在仓库里提交的 `docs/AUDIT-CODEX-v0.1.1-rc8.md`（六条意见）。逐条复核后**四条属实、一条口径问题、一条属实但不改**。
+这一版**把 `/mcp` 的传输层从手写 JSON-RPC 换成官方 `mcp` SDK**（审计第一条：`requirements.txt` 声明了依赖却全仓零 `import mcp`），
+并顺手把两条「失败开放」的路径关掉。
+
+| # | 级别 | 主题 | 关键点 |
+|---|---|---|---|
+| AUDIT-RC8-01 | 高 | MCP 重复造轮子 | 新增 `bigfish/mcp_adapter.py`（532 行）承载传输层，用官方 `StreamableHTTPSessionManager`；`tool_specs()` / `dispatch_tool()` 仍是唯一业务入口，鉴权、维护期 503、字段上限、审计全部保留。`server.py` 只留 `Route("/mcp", ...)` 两行挂载 |
+| AUDIT-RC8-02 | 高 | 未知 reviewer model 失败开放 | `role_for_db_row()` 认不出 model 时默认 `gemini`，等于「写错一列 = 拿到审查权限」。改成失败关闭：`DENIED_ROLE` 哨兵，只有能唯一判定 gpt/gemini 才给角色 |
+| R9-01 | 高 | 注册入口与解析入口判定不同源 | `register_executor()` 用的是另一套推断（默认 gemini），与 `role_for_db_row()` 不一致。改成同一套 `has_gpt`/`has_gem` 判定，两可时**拒绝注册**并要求显式 `model=` |
+| AUDIT-RC8-06 | 高 | MCP 兼容性没有真实客户端覆盖 | 新增 `tests/test_v011_rc9_socket.py`：进程内起真 uvicorn，用**官方 SDK 客户端**跑完整闭环。这条测试立刻暴露了 R9-02 |
+| R9-02 | 高 | MCP 鉴权失败返回 200 + error 让客户端挂死 | 官方客户端收到 `200 + {jsonrpc, id: null, error}` 时 pydantic 校验失败、**挂住 3 分钟不退出**。改成 HTTP 401（MCP 规范要求）。这是「真实客户端测试」才照得出来的 |
+| R9-03 | 中 | 会话管理器每进程只能 `run()` 一次 | `StreamableHTTPSessionManager.run()` 二次调用抛 `RuntimeError`。改成每请求新建（`stateless_http=True` 本就无状态），因此也不需要 app lifespan |
+| R9-04 | 中 | 维护期恢复时 MCP 仍可能排队 | 恢复期间 DB 处于维护模式，新请求应立刻 503 而不是等锁超时。在 `McpAsgi` 入口前置判 `maintenance_reason` |
+| AUDIT-RC8-05 | 低 | 发布文档测试数量矛盾（318 / 322 / 295 混用） | 全部统一到 345；README 测试表补上 rc8/rc9 三行 |
+| AUDIT-RC8-04 | 低 | 移动端口径 | 事实核对：`docs/ARCHITECTURE-FUTURE.md:889` 已写「apk — 未实现」，README/CHANGELOG 无虚假声明。**不改代码**，只在 README 补一句口径 |
+| AUDIT-RC8-03 | — | rc8 tag 落在无父提交上 | 历史提交无法补救，**本轮不打补丁**；rc9 起改在真实线性历史上打 tag，见第 11 节 |
 ### rc8 改了什么（一句话版）
 
 起点是 GPT 复核 rc7 后给出的 5 条未闭合项（其中 R7-01/R7-02 是 P1），加上第一次 GitHub Actions 跑出来的两个平台专属缺陷。
@@ -221,6 +244,7 @@ LD_LIBRARY_PATH=/home/dsh/.local/libbfc QT_QPA_PLATFORM=offscreen \
   .venv/bin/python -m unittest discover -s tests -t .
 # rc7 → Ran 295 tests in 60.507s / OK / exit 0
 # rc8 → Ran 322 tests in 148.492s / OK (skipped=1) / exit 0
+# rc9 → Ran 345 tests in 175.583s / OK (skipped=1) / exit 0
 # rc6 当时 → Ran 265 tests in 41.728s / OK / exit 0
 # 复核：本次改写文件时又跑了一遍，265 项同样 OK（耗时 55.093s，仅机器负载不同）
 ```
@@ -283,8 +307,8 @@ VPS → Windows 客户端 `100.64.0.11:3096`（Tailscale Serve，仅 tailnet，�
 | U2 | 开机自启 | 未注册；`tools/start-headless.ps1` 真机未跑通（`schtasks /TR` 嵌套引号报 `-2147467259`） | WMI 起的进程重启即消失 |
 | U3 | DSH MCP 连接导入 | 未导入（需人类授权） | 现在 DSH 尚未接上这个控制台 |
 | U4 | rc3 / rc4 / rc5 / rc6 跨机闭环 | 未重跑 | 跨机证据仍是 rc2 时期的 |
-| U5 | 平台 B 的完整回归 | **已由 CI 承担**：`windows-latest` 上 Python 3.11 与 3.13 各跑一遍 322 项，两遍都是 `OK (skipped=1)`（183.951s / 197.687s），见第 4.4 节 | 覆盖的是 GitHub 托管 runner 的 Windows Server 镜像，不是用户那台装了 PySide6 6.12.0 的 Windows 11；GUI 冒烟在 runner 上通过，真窗口仍未人眼确认（U1） |
-| U9 | 平台 B 复跑新增用例 | **已做**：CI 上 322 项在 Python 3.11 与 3.13 两个版本都跑完，包含 rc7 的 28 项与 rc8 的 27 项。rc7 时期「Windows 只有 294 项结果」的缺口至此闭合 | — |
+| U5 | 平台 B 的完整回归 | **rc8 期已由 CI 承担**：`windows-latest` 上 Python 3.11 与 3.13 各跑一遍 322 项，两遍都是 `OK (skipped=1)`（183.951s / 197.687s），见第 4.4 节。**rc9 的 345 项尚未推 CI**，写作时只有平台 A 的结果 | 覆盖的是 GitHub 托管 runner 的 Windows Server 镜像，不是用户那台装了 PySide6 6.12.0 的 Windows 11；GUI 冒烟在 runner 上通过，真窗口仍未人眼确认（U1） |
+| U9 | 平台 B 复跑新增用例 | **rc8 已做**（322 项两版本都跑完，含 rc7 的 28 项与 rc8 的 27 项）；**rc9 未做**——新增的 23 项（`test_v011_rc9.py` 15 + `test_v011_rc9_socket.py` 8）还没在 Windows 上跑过。socket 那 8 项起的是真 uvicorn 进程，Windows 上要盯端口释放与子进程编码 | rc9 的协议层修复在 Windows 上是否同样成立，目前无证据 |
 | U6 | 平台 B 静态检查 | **已补齐**：`pyflakes bigfish tools tests` 零输出（退出码 0，pyflakes 4.1.0）、`compileall -q` 退出码 0 | Windows 侧的名字类检查与平台 A 同口径 |
 | U7 | 类型检查（mypy / pyright） | 未接 | 只有 `compileall` 与 `pyflakes` 两道 |
 | U8 | 长时运行（soak） | 未做 24h 连续跑 | 长期泄漏、票过期满 6 小时后行为未验 |
@@ -327,7 +351,7 @@ rc6 新增的两条残余风险：
 
 ## 7. 请你重点看这几处（作者自认最可能还有问题的）
 
-下面 **9 条**是**作者自己怀疑的地方**，不是「已经确认没问题」。每条都附两轮处置标注：
+下面 **10 条**是**作者自己怀疑的地方**，不是「已经确认没问题」。每条都附两轮处置标注：
 rc5 那轮在标题上（【rc5 已修】/【rc5 部分解决】/【rc5 未改动】），rc6 那轮在每条末尾的「rc6 的处置」段
 （【rc6 已修】/【rc6 部分解决】/【rc6 未改动】）；标「仍有疑问」的请优先挑刺。
 
@@ -728,6 +752,33 @@ FAILED (failures=1, skipped=1)
 4. 第一次 CI 红不一定是代码错，也可能是「测试里的假设」错（时钟粒度）。但**不要因为它是测试就当成假警报**：另一处 cp1252 就是真缺陷，两条得分开判。
 
 第二次 CI（run `45174755219`，head `fdd5c12`）五个 job 全 success，两个 Windows job 都是 `Ran 322 tests` + `OK (skipped=1)`，见第 4.4 节。
+### Q12. 手写协议 vs 官方 SDK：为什么「自己测自己」不算兼容性证据（本轮新发现）　【rc9 已修】
+
+rc8 及以前，`/mcp` 是一段 300 多行手写 JSON-RPC：自己拼 `initialize` 响应、自己拼 `tools/list`、自己拼 `tools/call`。
+它有一整套测试（`tests/test_v011_api.py` 里 6 项 + 后来的 MCP 相关项），**全绿**。
+
+问题是：**那套测试用的是我自己写的客户端**（`tools/selfcheck.py` 里的 `requests.post` + 手拼 JSON）。
+手写服务端 + 手写客户端，两边对着同一份理解写，当然对得上。这只能证明「我认为的协议是自洽的」，
+不能证明「官方客户端能连上」。换句话说——**测试在验证实现，不在验证协议**。
+
+Codex 的审计第 6 条（【存疑】）指的就是这个。换成官方 SDK 之后，新测试 `tests/test_v011_rc9_socket.py` 干的事是：
+进程内起真 uvicorn，用 `mcp.client.streamable_http.streamablehttp_client` + `ClientSession`（**官方实现**）跑完整闭环。
+第一次跑就挂住 3 分钟——因为鉴权失败时我返回的是 `200 + {jsonrpc, id: null, error}`，
+官方客户端的 `JSONRPCMessage.model_validate_json` 报 9 条 pydantic 错（`id` 不能为 null），然后**既不抛也不退**。
+这就是 R9-02，光看服务端日志永远发现不了。
+
+**方法论**（和 Q11 是同一类）：
+
+1. 「自己写 A、自己写 B、测 A 和 B 能通」不构成协议兼容性证据，只构成自洽性证据。
+2. 判断标准是「换一个独立实现来连」。第三方实现的存在本身就是证据。
+3. 标准里写着的行为（凭据无效回 401）不是风格问题；偏离它会让真实客户端进入未定义状态（本例是挂死，不是报错）。
+4. 依赖声明和实际使用要对齐：`requirements.txt` 里写了 `mcp` 却全仓零 `import mcp`，说明有一层东西被重写了——
+   翻 `requirements` 和 `grep import` 的差集，是最省力的「重复造轮子」探测器。
+
+**仍未闭合的部分**：换 SDK 之后，rc8 那套「精确到字节」的旧测试里有几处断言依赖手写实现的具体形状
+（例如协议版本被硬编码成 `2025-03-26`）。SDK 的行为是**协商**——客户端要什么版本、在 `SUPPORTED_PROTOCOL_VERSIONS` 里就回什么。
+所以 `test_initialize_negotiates_protocol` 改成了双断言：官方客户端拿到的版本必须在支持列表内，
+且手工指名 `2025-03-26` 的请求必须原样回显。这是**语义更严**，不是放松。
 ## 8. 怎么跑起来
 
 ### Linux / macOS / WSL
@@ -770,7 +821,7 @@ python -m unittest tests.test_v011_rc6.TestCrossProcessLease -v   # rc6 的跨�
 【P2 级问题】（可维护性/文档，建议修）
 
 【对第 7 节 8 个疑问的逐条回答】
-Q1 ... Q8
+Q1 ... Q12
 
 【你认为还有哪些作者没想到的】
 ```
@@ -783,7 +834,7 @@ Q1 ... Q8
   内网地址已替换为 `100.64.0.11` / `100.64.0.12` / `100.64.0.21` 这类占位，主机名替换为 `CLIENT-A` / `CLIENT-B` / `VPS-HOST`。
 - `bigfish/core.py` 里的 `TICKET_PREFIX = "bfc_tk_"`、`security.py` 里的 `SECRET_PREFIXES` 都是**代码常量**，不是真票据。
 - 本项目是**单机本地工具**，威胁模型**不含**「攻击者已获得本机 root/Administrator」。
-- 提交 PR 请附带：改了哪条不变式、加了哪个测试、原有 265 项是否仍全绿。
+- 提交 PR 请附带：改了哪条不变式、加了哪个测试、原有 345 项是否仍全绿。
 
 ---
 
@@ -797,6 +848,7 @@ Q1 ... Q8
 | v0.1.1-rc3 | 状态机取消语义、恢复原子性、幂等并发、监听地址、凭据脱敏 | 129 |
 | v0.1.1-rc4 | 运行时所有权、库版本识别、恢复成对原子、审查绑定、多轮执行票、MCP 协议、端口预留 | 162 |
 | v0.1.1-rc5 | 恢复后授权作废（R1）、事件落库（R2）、撤评论边界（R3）、锁内时间戳（R4）、执行收据（R5）、审计白名单（R6）、跳板硬闸门（R7）、恢复期排空（R8）、密钥自愈（R9）；schema 3 → 4 | **244** |
+| **v0.1.1-rc9** | Codex 审计 AUDIT-RC8-01～06 收口：`/mcp` 传输层换官方 SDK（新增 `bigfish/mcp_adapter.py`，`server.py` 630 → 393 行）、未知 reviewer model 失败关闭（`DENIED_ROLE`）、注册入口与解析入口同源判定、鉴权失败改 HTTP 401、会话管理器每请求新建、维护期 MCP 前置 503；**schema 未变，仍 v4**；首次用官方 SDK 客户端走真实 socket 做兼容性测试 | **345** |
 | **v0.1.1-rc8** | 第六轮硬化：R7-01 Windows 同进程句柄竞态（`locks.py` 整段串行 + 异常关句柄）、R7-02 未知角色失败关闭（`DENIED_ROLE` 哨兵 + 鉴权拒绝 + 审计）、R8-01 控制台解码兜底（`run_capture()` 五编码）、R8-02 cp1252 编码兜底（新增 `bigfish/console.py`）、R8-03 心跳续租时钟粒度；**schema 未变，仍 v4**。平台 B 改由 GitHub Actions 承担，322 项首次两个平台都完整跑完 | **322** |
 | **v0.1.1-rc7** | Codex 审计 BFC-01～BFC-08 收口：`locks.py` 重写成单一内核对象（BFC-01）、MCP 字段级 `maxLength`（BFC-02）、`create_production_app` + 连接级回环闸门（BFC-03）、manifest 改 `credential_status` 枚举（BFC-04）、CLI 全分支关库（BFC-05）、`allowed-ports` 打预留端口（BFC-06）、`requirements.lock` + CI（BFC-07）、真实提交上打 tag（BFC-08）；另加手机端只读角色 `MOBILE_VIEWER`。**schema 未变，仍 v4** | **295** |
 | **v0.1.1-rc6** | Astra 审计 F-01～F-09 收口：维护模式 guard/锁原子化（F-01）、`restore_epoch` 读取修复（F-02）、密钥自愈失败拒绝启动（F-03）、CLI 端口预检前移（F-04）、GUI 停服确认（F-05）、跨进程恢复租约 `locks.py`（F-06）、审计包凭据声明诚实化（F-07）、`create_app` 边界写明（F-08）、请求体上限（F-09）；**schema 未变，仍 v4** | **265** |
@@ -805,6 +857,7 @@ Q1 ... Q8
 `docs/FIX-MATRIX-v0.1.1-rc4.md`、`docs/DIFF-SUMMARY-v0.1.1-rc4.md`。
 rc7 的证据在 `CHANGELOG.md` 的 rc7 段、`tests/test_v011_rc7.py`（28 项）与本文件第 7 节 Q3/Q9.2/Q10。
 rc8 的证据在 `CHANGELOG.md` 的 rc8 段、`tests/test_v011_rc8.py`（27 项）、`docs/TEST-REPORT-v0.1.1-rc8.md` §5（第一次 CI 两处失败原文）与本文件第 4.4 节。
+rc9 的证据在 `CHANGELOG.md` 的 rc9 段、`tests/test_v011_rc9.py`（15 项）、`tests/test_v011_rc9_socket.py`（8 项）、`docs/TEST-REPORT-v0.1.1-rc9.md`、`docs/DIFF-SUMMARY-v0.1.1-rc9.md` 与本文件第 7 节 Q12。
 rc6 也没有单独的 `docs/` 专档，证据散在 `CHANGELOG.md`、`tests/test_v011_rc6.py` 与第 4 节。
 
 ---

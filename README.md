@@ -1,25 +1,26 @@
-# BigFish Council / 大肥鱼议事厅 v0.1.1-rc8
+# BigFish Council / 大肥鱼议事厅 v0.1.1-rc9
 
 Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 人类在本机批准，云端只能领取**已批准**的任务，回传结果后仍需人类验收。
 
 全程不开放任何公网端口，不使用 Tailscale Funnel。
 
-> **rc8 是第六轮硬化：GPT 复核 rc7 剩下的 5 条未闭合项 + CI 暴露的 3 个平台专属坑。**
+> **rc9 是第七轮硬化：把 MCP 协议层从手写 JSON-RPC 换成官方 SDK，并修掉审计指出的提权口子。**
 > 本版只修不重写，schema 未变（仍 v4），数据库不需要迁移。
 >
-> - **R7-01（P1）** Windows 同进程并发打开同一个数据库时，`_LOCAL` 句柄表有竞争窗口：查表在锁内、抢槽位在锁外，两个线程各自开文件抢槽，后者覆盖前者，先完成者 release 时 `held[0] is not fh` 直接 return → 句柄与槽位双泄漏，攒够 64 次谁也打不开库。改成整段串行 + 异常路径关句柄。
-> - **R7-02（P1）** 未登记的 `executors.role` 会回落成执行器——写错一个字符串就等于拿到 claim / submit。改成失败关闭：映射到零权限哨兵 `DENIED_ROLE`、鉴权直接抛错并写审计，服务层那两处 `or R.EXECUTOR_DSH` 也一并去掉。
-> - **R8-01（P1）** Windows 上 `icacls` 输出按代码页编码，`subprocess.run(text=True)` 解不动就抛/退化成空串，密钥文件权限校验静默失效。改成先拿 bytes 再按 utf-8 → gbk → cp936 → mbcs → utf-16-le 兜底解码，外部命令统一走 `run_capture()`。
-> - **R8-02（P1，CI 实测）** 英文版 Windows / CI runner 的 stdout 是 cp1252，`print("健康检查")` 直接抛 `UnicodeEncodeError`，`tools/selfcheck.py` 在第一行输出就整进程退出。新增 `bigfish/console.py`：只在当前编码表示不了中文时切 UTF-8 + `errors="replace"`，cp936 与 UTF-8 环境一律不动。
-> - **R8-03（P2，CI 实测）** Windows `time.time()` 分辨率约 15.6ms，claim 与 heartbeat 落在同一 tick 时 `renewed_at` 不变，测试误判成「续租没前进」。测试改为显式跨过一个 tick 再断言。
-> - **CI-01 / CI-02 / MINOR-01** 三处子进程编码与启动窗口写死、CLI 缺 `mobile` 角色选项。
+> - **AUDIT-RC8-01（P1）** `requirements.txt` 早就声明了官方 `mcp` SDK，但 `server.py` 一直手写 initialize / ping / tools/list / tools/call，全仓 `import mcp` 零命中。协议演进跟不上、错误码靠自己维护。新增 `bigfish/mcp_adapter.py`（533 行）承载传输层，业务只留 `dispatch_tool()` 一个入口，REST 与 MCP 共用；`server.py` 从 630 行降到 393 行。
+> - **AUDIT-RC8-02（P1）** 未知 reviewer model 是失败开放：`role_for_db_row("reviewer","weird","unknown")` 返回 Gemini——写错一列就白拿审查票权。改成失败关闭：只有「显式 model」或「名称唯一可辨」两条路径能映射，其余落到零权限哨兵 `DENIED_ROLE` 并写审计。注册入口 `register_executor` 同步改成同一套判定。
+> - **AUDIT-RC8-06（P1）** MCP 只有 FastAPI `TestClient` 覆盖，从来没有真实客户端握手。新增 `tests/test_v011_rc9_socket.py`：进程内起真 uvicorn（真 socket、真端口）+ 客户端用**官方 mcp SDK**，协议层由第三方实现验收，不是自己测自己。
+> - **R9-01（P1，换 SDK 暴露）** `StreamableHTTPSessionManager.run()` 每个实例只能进一次，第二次请求抛 `RuntimeError`。改成每请求新建（stateless 本就不存会话），顺带去掉对 app lifespan 的依赖。
+> - **R9-02（P1，换 SDK 暴露）** 鉴权失败回 `200 + error` 时，官方 SDK 客户端会因 `id: null` 触发 pydantic 校验错并**挂死不返回**（实测挂满 3 分钟被外部砍）。按 MCP 规范改成 `HTTP 401`。
+> - **R9-03 / R9-04（P2）** 用 `Route` 替代 `Mount`（精确路径不再先回 307）；维护期改成 `503 + Retry-After: 15`，执行器不会把「有响应」误当成「票到手了」。
+> - **AUDIT-RC8-03（发布流程）** rc8 的 tag 落在**无父提交**上（每版都在公开副本里 `git init` 单提交 `push -f`）。rc9 起改为在已有远端历史上**线性追加**提交，`git diff v0.1.1-rc8 v0.1.1-rc9` 从此可用。历史三个 tag 无法补救（改写会让已发布附件哈希失效），在此记录分界点。
 >
-> **测试从 295 项涨到 322 项**，v0.1.0 的 21 项原样在位，无删除、无放宽断言。
-> 平台 A（Debian 12 / Python 3.11.2）**322 项全绿**：`Ran 322 tests in 148.492s` + `OK (skipped=1)`，退出码 0。
-> 平台 B 由 GitHub Actions 的 `windows-latest` 承担：第一次运行把 **318 项全跑完了**（181.158s），只挂 1 项时钟粒度；另一个 job 挂在自检的 cp1252 编码上——两个坑都在本版修掉，详见 [docs/TEST-REPORT-v0.1.1-rc8.md](docs/TEST-REPORT-v0.1.1-rc8.md) §5。
+> **测试从 322 项涨到 345 项**，v0.1.0 的 21 项原样在位，无删除、无跳过、无放宽断言（唯一被改的旧断言 `selfcheck.py` 的 `st == 200` → `401` 是修对了缺陷本身）。
+> 平台 A（Debian 12 / Python 3.11.2）**345 项全绿**：`Ran 345 tests in 175.583s` + `OK (skipped=1)`。
+> 平台 B 由 GitHub Actions 的 `windows-latest` 承担，详见 [docs/TEST-REPORT-v0.1.1-rc9.md](docs/TEST-REPORT-v0.1.1-rc9.md) §5。
 >
-> **rc8 仍是发布候选，不是生产版。** 还欠：公司机（Windows 11 / Python 3.14.6）真机复跑、GUI 真窗口验收、跨设备 MCP 闭环重跑、exe 打包。详见 [AUDIT.md](AUDIT.md) §5 与 [docs/DELIVERY-v0.1.1-rc8.md](docs/DELIVERY-v0.1.1-rc8.md) §6。
+> **rc9 仍是发布候选，不是生产版。** 还欠：公司机（Windows 11 / Python 3.14.6）真机复跑、GUI 真窗口验收、跨设备 MCP 闭环重跑、exe 打包。详见 [AUDIT.md](AUDIT.md) §5 与 [docs/DELIVERY-v0.1.1-rc9.md](docs/DELIVERY-v0.1.1-rc9.md) §6。
 
 ---
 
@@ -27,11 +28,11 @@ Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 
 唯一的正式分发渠道是本仓库的 **GitHub Release**，不额外挂任何分发站点：
 
-<https://github.com/dreamobserver/BigFish-Council-/releases/tag/v0.1.1-rc8>
+<https://github.com/dreamobserver/BigFish-Council-/releases/tag/v0.1.1-rc9>
 
 | 附件 | 用途 |
 | --- | --- |
-| `bfc-src-v011rc8.zip` | rc8 完整源码树（115 文件）。解压即用，不需要 git |
+| `bfc-src-v011rc9.zip` | rc9 完整源码树。解压即用，不需要 git |
 | `SHA256SUMS.txt` | 上一条 zip 的 sha256，外加包内 115 个文件的逐行 sha256 |
 
 > 每个附件的**文件数与 sha256 以 Release 页与本包内 `SHA256SUMS.txt` 为准**——
@@ -241,7 +242,8 @@ BFC_BASE_URL=http://100.64.0.11:3096 BFC_TOKEN=<执行器 token> \
 | `bigfish/db.py` | schema 4、迁移、审计表、一致性快照、维护模式（`MaintenanceError`） |
 | `bigfish/runtime.py` | `open_council()` 统一装配路径 |
 | `bigfish/config.py` | 端口、路径、循环地址的唯一真源 |
-| `bigfish/server.py` | 本地 HTTP API + 手写 MCP JSON-RPC |
+| `bigfish/server.py` | 本地 HTTP API（`/health`、`/api/v1/*`）+ 把 `/mcp` 路由到 `McpAsgi` |
+| `bigfish/mcp_adapter.py` | **MCP 传输层（官方 SDK）**：工具清单、参数校验、鉴权闸门、`dispatch_tool()` 唯一业务入口 |
 | `bigfish/gui.py` | PySide6 五页界面 |
 | `bigfish/executor_client.py` | 执行器侧纯标准库客户端（含 `ReceiptLog` 收据与 reconcile 对账） |
 | `tools/bfc-proxy.mjs` | 127.0.0.1:3098 → Windows:3096 回环跳板（监听地址非回环即 `exit(1)`） |
@@ -255,6 +257,14 @@ BFC_BASE_URL=http://100.64.0.11:3096 BFC_TOKEN=<执行器 token> \
 | `tools/stop-headless.ps1` | 停掉计划任务并释放端口（只杀确属 BigFish Council 的进程，不无差别清端口） |
 | `build.ps1` | PyInstaller 打包脚本 |
 | `docs/DELIVERY-v0.1.1.md` | **本版交付说明：逐阶段的改动/测试/迁移/回滚/未完成** |
+| `docs/AUDIT-CODEX-v0.1.1-rc8.md` | **rc9 的起点：Codex 对 rc8 的第三方审计原文（六条意见，185 行）** |
+| `docs/DELIVERY-v0.1.1-rc9.md` | **rc9 交付说明：MCP 换官方 SDK、审查身份失败关闭、345 项证据、仍需人工四项** |
+| `docs/FIX-MATRIX-v0.1.1-rc9.md` | **rc9 修复总表：AUDIT-RC8-01/02/03/04/05/06 + R9-01～R9-04，逐条给文件行号、回归测试与状态** |
+| `docs/DIFF-SUMMARY-v0.1.1-rc9.md` | **rc9 代码 Diff 摘要（按文件给真实代码片段，含 mcp_adapter.py 全貌）** |
+| `docs/TEST-REPORT-v0.1.1-rc9.md` | **rc9 测试报告：345 项逐文件统计、新增 23 项逐条、测试质检、平台 B** |
+| `docs/SECURITY-REVIEW-v0.1.1-rc9.md` | **rc9 安全复审：审查身份提权、401 语义、维护期 503、残余风险 R1–R8** |
+| `docs/MIGRATION-v0.1.1-rc9.md` | rc8 → rc9 迁移（schema 未变，但三处语义变化要查） |
+| `docs/ROLLBACK-v0.1.1-rc9.md` | rc9 → rc8 回滚步骤、风险与「只回滚一部分」的路径 |
 | `docs/DELIVERY-v0.1.1-rc8.md` | **rc8 交付说明：R7-01/R7-02/R8-01～R8-03 修复、CI 证据、仍未做四项** |
 | `docs/FIX-MATRIX-v0.1.1-rc8.md` | **rc8 修复总表：逐条给文件行号、回归测试与状态** |
 | `docs/DIFF-SUMMARY-v0.1.1-rc8.md` | **rc8 代码 Diff 摘要（按文件给真实代码片段，含 console.py）** |
@@ -300,7 +310,7 @@ cd D:\BigFishCouncil\bigfish-council
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t . -v
 ```
 
-**295 个用例**（v0.1.0 原有 21 项全部保留 + 274 项新增，无 skip / 无 expectedFailure）：
+**345 个用例**（v0.1.0 原有 21 项全部保留，逐版累加，无 skip / 无 expectedFailure）
 
 | 文件 | 数量 | 覆盖 |
 | --- | --- | --- |
@@ -321,6 +331,9 @@ cd D:\BigFishCouncil\bigfish-council
 | `test_v011_rc5_dispatch_id.py` | 3 | claim 下发 dispatch_id 1 + 重放同号 1 + 重新派工换号 1 |
 | `test_v011_rc6.py` | 16 | 跨进程租约 6 + 审计凭据声明诚实性 5 + 请求体上限 2 + GUI 停服确认 3 |
 | `test_v011_rc7.py` | 28 | **rc7 新增**：租约原子性 6 + MCP 字段上限 4 + 回环闸门 5 + manifest 凭据枚举 3 + CLI 关库 2 + 发布工程 3 + 手机只读角色 5 |
+| `test_v011_rc8.py` | 27 | Windows 句柄竞态 2 + 未知角色失败关闭 7 + 控制台解码 6 + ACL 匹配 6 + 编码兜底 4 + 时钟粒度 2 |
+| `test_v011_rc9.py` | 15 | **rc9 新增**：未知审查身份失败关闭 10 + 注册入口同源 5 |
+| `test_v011_rc9_socket.py` | 8 | **rc9 新增**：真 uvicorn + 官方 SDK 客户端，协议协商 / 工具 schema / 完整闭环 / 幂等 / isError / 鉴权 / 越权 |
 
 自检 16 项：
 
@@ -335,10 +348,9 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe tools\gui_smoke.py
 ```
 
-平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）**rc7 的 295 项全绿**（实测 `Ran 295 tests in 60.507s` + `OK`，退出码 0）。
-平台 B（Windows 11 / Python 3.14.6 / SQLite 3.50.4）**rc7 的 294 项同样全绿**（`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0；收尾补的第 295 项未在 Windows 重跑）。上一轮 rc6 是 265 项全绿
-（`Ran 265 tests in 59.975s` + `OK (skipped=1)`，退出码 0，当时修完两个 Windows 专属真缺陷：msvcrt 按句柄锁、CLI restore 不关库，首跑是 `FAILED (errors=2)`）。
-这条缺口已在 AUDIT.md §5 U5 里关掉（2026-11-23 真机跑通）。
+平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）**rc9 的 345 项全绿**（实测 `Ran 345 tests in 175.583s` + `OK (skipped=1)`，退出码 0）。
+平台 B 由 GitHub Actions 的 `windows-latest` × Python 3.11 / 3.13 承担，每次推送都重跑；rc8 期第一次推 CI 就在 Windows 上暴露了两个真缺陷（cp1252 编码崩溃、时钟粒度误判），修完五个 job 全绿——这条通道是有效的。
+平台 C（公司机 Windows 11 / Python 3.14.6）rc8 之后未复跑，机器 Tailscale 离线。
 结果见 [AUDIT.md](AUDIT.md) §4 与 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 7. 安全边界（必读）
@@ -350,17 +362,17 @@ $env:QT_QPA_PLATFORM = "offscreen"
 - **备份包不加密**，里面有任务正文与 Prompt。靠文件系统权限保护，导出后请自行看管。
 - 详见 [docs/SECURITY-REVIEW-v0.1.1.md](docs/SECURITY-REVIEW-v0.1.1.md)；
   rc6 这一批的安全语义（Astra 五问 F-05～F-09 逐条、Q1–Q8 现状、Windows 侧残余风险）见
-  [docs/SECURITY-REVIEW-v0.1.1-rc6.md](docs/SECURITY-REVIEW-v0.1.1-rc6.md)。
+  [docs/SECURITY-REVIEW-v0.1.1-rc6.md](docs/SECURITY-REVIEW-v0.1.1-rc6.md)。；rc9 这一批见 [docs/SECURITY-REVIEW-v0.1.1-rc9.md](docs/SECURITY-REVIEW-v0.1.1-rc9.md)。
 
 ## 8. 升级
 
-### 8.1 从 v0.1.0 / rc1 / rc2 / rc3 / rc4 / rc5 / rc6 升到 rc7
+### 8.1 从任一历史版本升到 rc9
 
 1. 停掉所有进程（GUI、headless、任何打开着数据库的东西）；
 2. **完整备份数据目录**（含 `secrets\ticket.key`）；
 3. 换代码；
 4. 首次启动自动迁移：schema 1 → 2 → 3 → 4，全部只 ADD COLUMN + 建表建索引，不重建表；
-5. 跑 `python -m unittest discover -s tests -t .`，期望 `Ran 295 tests` + `OK`。
+5. 跑 `python -m unittest discover -s tests -t .`，期望 `Ran 345 tests` + `OK`。
 
 **rc6 → rc7 没有 schema 变化**（SCHEMA_VERSION 仍 4、BACKUP_FORMAT_VERSION 仍 4）：
 rc6 只改行为，数据库不用迁移。新增的磁盘痕迹只有租约文件：
@@ -402,7 +414,7 @@ rc6 只改行为，数据库不用迁移。新增的磁盘痕迹只有租约文�
 
 - 升级前先确认没有第二个 GUI 实例开着数据库（`os.replace` 在 Windows 上会因文件占用失败）；
 - 密钥文件权限走 `icacls`（不是 chmod），首次创建时会自动收紧；
-- **Windows 侧 rc7 已跑通**：`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0（Python 3.14.6 / SQLite 3.50.4；rc6 那次是 265 项全绿 59.975s）。该结果对应 294 项那一版，收尾新增的第 295 项未重跑。
+- **Windows 侧 rc7 已跑通**：`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0（Python 3.14.6 / SQLite 3.50.4；rc6 那次是 265 项全绿 59.975s）。该结果对应 294 项那一版，收尾新增的第 295 项未重跑。rc8 的 322 项由 GitHub Actions 跑过两遍全绿；**rc9 的 345 项尚未在 Windows 上跑**。
   rc4 的 162 项、rc5 的 244 项、rc6 的 265 项在 Windows 上都属于未验证，升级到新机器后先跑一遍自检再上业务；
 - **Windows 的恢复锁分支（msvcrt）已在真机跑过**：POSIX 走 fcntl/flock，Windows 走 64 槽位模型
   （`SLOTS = 64`，每个写者锁 1 字节，恢复端一次锁整段）；rc7 的 6 项 `TestLeaseAtomicity`（含 1 项 subprocess 起真独立进程）

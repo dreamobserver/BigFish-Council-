@@ -355,6 +355,11 @@ class Database:
     def in_maintenance(self) -> bool:
         return self._maint_depth > 0
 
+    @property
+    def maintenance_reason(self) -> str:
+        """维护原因（供 MCP 的 503 文案复用，不给外部看内部字段）。"""
+        return self._maint_reason
+
     # ---------- 基础 ----------
     def init_schema(self) -> None:
         """初始化 / 升级 schema（B1）。

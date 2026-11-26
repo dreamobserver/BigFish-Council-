@@ -12,33 +12,59 @@ v0.1.1-rc3 修复：
 - 监听地址校验下沉到 serve()，GUI / CLI / 模块三个入口共用同一道闸（P1-3.1）；
 - 执行器查任务状态必须是自己的任务，未分配任务不再对任何人放行（P1-3.3）；
 - MCP 与 REST 都接受 status=cancelled（取消确认），语义与 core 一致；
-- 业务失败 isError=true，鉴权失败 -32001（P1-4）。
+- 业务失败 isError=true，鉴权失败 HTTP 401 + -32001（P1-4；rc9 起按 MCP
+  规范从 200 改成 401，否则官方客户端会把 error 当成协议错挂住）。
 """
 from __future__ import annotations
 
 import json
-import os
 import time
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.routing import Route
 
 from . import __version__, roles as R
 from .config import DEFAULT_API_HOST, DEFAULT_API_PORT, is_loopback_host
 from .core import Council, CouncilError
 from .db import MaintenanceError
+from .mcp_adapter import (  # noqa: F401 —— 协议层迁出后仍从这里导出，历史 import 不用改
+    MAX_BODY_BYTES,
+    MAX_TEXT_FIELD,
+    MCP_PROTOCOL,
+    SERVICE,
+    TOOL_ORDER,
+    TOOL_PERMISSIONS,
+    McpAsgi,
+    _status_payload,
+    dispatch_tool,
+    have_sdk,
+    tool_specs,
+)
 
-SERVICE = "bigfish-council"
-MCP_PROTOCOL = "2025-03-26"
-# F-09：请求体上限。默认 8 MiB，够放一份大 diff + 长日志，又能挡住
-# 「被控制的执行器一次塞 1GB 进来把我们 2.4G 的容器打爆」。
-MAX_BODY_BYTES = int(os.environ.get("BFC_MAX_BODY_BYTES") or 8 * 1024 * 1024)
-# 单个自由文本字段的上限（MCP/REST 共用），比整体上限小一半，避免一个字段吃满。
-MAX_TEXT_FIELD = int(os.environ.get("BFC_MAX_TEXT_FIELD") or 4 * 1024 * 1024)
+# rc9：协议层搬到 mcp_adapter 之后，这些名字仍然从 server 导出（历史 import
+# 路径不动，测试与 tools/selfcheck.py 直接 from bigfish.server import ...）。
+# 写进 __all__ 既表明是「有意再导出」，也让 pyflakes 静态检查不把它们误报成未使用。
+__all__ = [
+    "BindError",
+    "MAX_BODY_BYTES",
+    "MAX_TEXT_FIELD",
+    "MCP_PROTOCOL",
+    "McpAsgi",
+    "SERVICE",
+    "TOOL_ORDER",
+    "TOOL_PERMISSIONS",
+    "check_bind_host",
+    "create_app",
+    "create_production_app",
+    "dispatch_tool",
+    "have_sdk",
+    "serve",
+    "tool_specs",
+]
+
 SUBMIT_CHOICES = "^(completed|failed|blocked|cancelled)$"
 
 
@@ -316,94 +342,20 @@ def create_app(council: Council, watchdog_interval: float | None = None) -> Fast
         _need(ex, "task.read.own", "查询任务状态")
         return _owned_status(council, ex, task_id)
 
-    # ---------------- MCP（streamable HTTP, JSON 响应） ----------------
-    @app.post("/mcp")
-    async def mcp(request: Request):
-        try:
-            token = _bearer(request.headers.get("authorization"))
-        except HTTPException as e:
-            return _mcp_error(None, -32001, str(e.detail))
-        try:
-            ex = council.authenticate(token, role="executor")
-        except CouncilError as e:
-            return _mcp_error(None, -32001, str(e))
-
-        try:
-            msg = await request.json()
-        except Exception:
-            return _mcp_error(None, -32700, "请求体不是合法 JSON")
-        if not isinstance(msg, dict):
-            return _mcp_error(None, -32600, "不支持批量请求")
-
-        if not isinstance(msg.get("jsonrpc"), str) or msg.get("jsonrpc") != "2.0":
-            return _mcp_error(msg.get("id"), -32600, "jsonrpc 必须是 \"2.0\"")
-        method = msg.get("method")
-        has_id = "id" in msg
-        rid = msg.get("id")
-        if not isinstance(method, str) or not method:
-            # 通知 = 没有 id 且没有 method 合法值？不对：通知也有 method。
-            # 缺 method 的请求既不是请求也不是通知，必须按 Invalid Request 回错。
-            return _mcp_error(rid, -32600, "缺少 method")
-        if not has_id:  # 真通知：无 id，不回结果体
-            return JSONResponse(status_code=202, content={"ok": True})
-
-        def ok(result: Any):
-            return JSONResponse(content={"jsonrpc": "2.0", "id": rid, "result": result})
-
-        def err(code: int, message: str):
-            return JSONResponse(content={"jsonrpc": "2.0", "id": rid,
-                                         "error": {"code": code, "message": message}})
-
-        if method == "initialize":
-            return ok({
-                "protocolVersion": MCP_PROTOCOL,
-                "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "bigfish-council", "version": __version__},
-                "instructions": "大肥鱼议事厅任务板。只能领取已获人类批准的任务；"
-                                "汇报进度用 council_heartbeat，提交结果用 council_submit_result，"
-                                "收到取消指令并用 council_submit_result(status=cancelled) 确认停止。",
-            })
-        if method == "ping":
-            # ping 带 id 就是请求，必须回 result；回 202 会让客户端一直等超时（E3）
-            return ok({})
-        if method == "notifications/initialized":
-            return JSONResponse(status_code=202, content={"ok": True})
-        if method == "tools/list":
-            return ok({"tools": [tool_specs()[n] for n in TOOL_ORDER]})
-        if method == "tools/call":
-            params = msg.get("params") or {}
-            name = params.get("name")
-            args = params.get("arguments") or {}
-            if not isinstance(args, dict):
-                return err(-32602, "arguments 必须是对象")
-            if name not in tool_specs():
-                return err(-32601, f"未知工具：{name}")
-            is_error = False
-            try:
-                bad = _validate_args(tool_specs()[name], args)
-                if bad:
-                    raise CouncilError(bad)
-                # SQLite 是同步阻塞调用，直接跑会卡住事件循环（并发心跳会被排队）
-                content = await run_in_threadpool(dispatch_tool, council, ex, name, args)
-                if not isinstance(content, dict) or content.get("ok") is False:
-                    is_error = True
-            except MaintenanceError as e:
-                # 维护期：明确告诉调用方「这次没执行」，别让它以为业务失败
-                return _mcp_error(rid, -32000, str(e))
-            except CouncilError as e:
-                content, is_error = {"ok": False, "error": str(e)}, True
-            except HTTPException as e:
-                content, is_error = {"ok": False, "error": str(e.detail)}, True
-            except Exception:
-                content, is_error = {"ok": False, "error": "服务端内部错误"}, True
-            return ok({"content": [{"type": "text", "text": _json(content)}],
-                       "isError": is_error})
-
-        return err(-32601, f"不支持的方法：{method}")
-
-    @app.get("/mcp")
-    def mcp_get():
-        return JSONResponse(status_code=405, content={"error": "只接受 POST"})
+    # ---------------- MCP（streamable HTTP，官方 SDK 承载协议） ----------------
+    # rc9 / AUDIT-RC8-01：协议层不再手写。McpAsgi 内部先过鉴权与维护期闸门，
+    # 再交给 SDK 的 StreamableHTTPSessionManager；业务仍然只有 dispatch_tool() 一个入口。
+    #
+    # 用 Route 而不是 Mount：Mount("/mcp") 对精确路径 /mcp 只会给 PARTIAL 匹配，
+    # Starlette 的 redirect_slashes 会先回一个 307 到 /mcp/。老客户端（以及
+    # tools/selfcheck.py、remote_check.py）都是直接打 /mcp，不该被跳一次；
+    # Route 的 endpoint 传「类实例」时 Starlette 按 ASGI 调用（函数才会被当成
+    # request-response 包一层），所以这里两个路径都能直接命中。
+    _mcp_app = McpAsgi(council)
+    app.router.routes.insert(0, Route("/mcp", endpoint=_mcp_app,
+                                      methods=["POST", "GET", "DELETE"]))
+    app.router.routes.insert(1, Route("/mcp/", endpoint=_mcp_app,
+                                      methods=["POST", "GET", "DELETE"]))
 
     return app
 
@@ -415,189 +367,6 @@ def _owned_status(council: Council, ex: dict, task_id: str) -> dict:
     if not owner or owner != ex.get("id"):
         raise HTTPException(status_code=403, detail="任务不属于该执行器")
     return _status_payload(t)
-
-
-def _validate_args(spec: dict, args: dict) -> str | None:
-    """按 inputSchema 做最小校验，返回错误文案（None 表示通过）。
-
-    只校验三件事：必填、未知字段、基本类型。类型不符以前会一路穿到 core 里
-    抛 TypeError、被兜底成「服务端内部错误」，客户端看不出是自己传错了。"""
-    schema = spec.get("inputSchema") or {}
-    props = schema.get("properties") or {}
-    required = schema.get("required") or []
-    missing = [k for k in required if k not in args or args[k] in (None, "")]
-    if missing:
-        return "缺少必填参数：" + ", ".join(missing)
-    if schema.get("additionalProperties") is False:
-        extra = [k for k in args if k not in props]
-        if extra:
-            return "不支持的参数：" + ", ".join(extra)
-    for k, v in args.items():
-        spec_k = props.get(k) or {}
-        want = spec_k.get("type")
-        if want == "string" and not isinstance(v, str):
-            return f"参数 {k} 必须是字符串"
-        # BFC-02：自由文本必须有字段级上限。MCP 请求整体虽然受 MAX_BODY_BYTES
-        # 限制，但一个字段就能独占几乎整个请求体，在 JSON 解析和业务处理之前
-        # 就已经进内存了。REST 侧 Pydantic 早就有 max_length，这里补上同一道。
-        limit = spec_k.get("maxLength")
-        if limit is not None and isinstance(v, str) and len(v) > limit:
-            return f"参数 {k} 超过长度上限 {limit} 字符（实际 {len(v)}）"
-        enum = spec_k.get("enum")
-        if enum is not None and v not in enum:
-            return f"参数 {k} 只能是 {' / '.join(map(str, enum))}"
-    return None
-
-
-def _mcp_error(rid: Any, code: int, message: str) -> JSONResponse:
-    return JSONResponse(content={"jsonrpc": "2.0", "id": rid,
-                                 "error": {"code": code, "message": message}})
-
-
-def _status_payload(t: dict) -> dict:
-    return {
-        "ok": True,
-        "task_id": t["id"],
-        "status": t["status"],
-        "status_label": t["status_label"],
-        "version": t["current_version"],
-        "control": {"pause": bool(t["control"].get("pause_requested")),
-                    "cancel": bool(t["control"].get("cancel_requested"))},
-        "blocked_reason": t.get("blocked_reason"),
-    }
-
-
-def _json(obj: Any) -> str:
-    import json
-    return json.dumps(obj, ensure_ascii=False)
-
-
-TOOL_ORDER = [
-    "council_list_tasks",
-    "council_claim_task",
-    "council_heartbeat",
-    "council_submit_result",
-    "council_task_status",
-]
-
-
-def tool_specs() -> dict[str, dict]:
-    return {
-        "council_list_tasks": {
-            "name": "council_list_tasks",
-            "description": "列出当前可领取的、已获人类批准的任务（不含 Prompt 正文）。",
-            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-        "council_claim_task": {
-            "name": "council_claim_task",
-            "description": "领取指定任务，返回不可变 Prompt 与执行票。同一任务重复领取会失败。",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "任务 ID"},
-                    "idempotency_key": {"type": "string", "description": "可选幂等键"},
-                },
-                "required": ["task_id"],
-                "additionalProperties": False,
-            },
-        },
-        "council_heartbeat": {
-            "name": "council_heartbeat",
-            "description": "上报执行心跳并续租，返回是否收到暂停/取消指令。超时未心跳任务会被阻断。",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticket": {"type": "string"},
-                    "status": {"type": "string", "enum": ["running", "paused"]},
-                    "detail": {"type": "string", "maxLength": MAX_TEXT_FIELD},
-                    "idempotency_key": {"type": "string"},
-                },
-                "required": ["ticket"],
-                "additionalProperties": False,
-            },
-        },
-        "council_submit_result": {
-            "name": "council_submit_result",
-            "description": ("提交执行日志、Diff 与测试结果。completed 进入待人类验收，不会自动 DONE；"
-                            "收到取消指令后必须用 status=cancelled 明确确认已停止。"),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticket": {"type": "string"},
-                    "status": {"type": "string",
-                               "enum": ["completed", "failed", "blocked", "cancelled"]},
-                    "log": {"type": "string", "maxLength": MAX_TEXT_FIELD},
-                    "diff": {"type": "string", "maxLength": MAX_TEXT_FIELD},
-                    "tests": {"type": "string", "maxLength": MAX_TEXT_FIELD},
-                    "note": {"type": "string", "maxLength": MAX_TEXT_FIELD},
-                    "idempotency_key": {"type": "string"},
-                },
-                "required": ["ticket", "status"],
-                "additionalProperties": False,
-            },
-        },
-        "council_task_status": {
-            "name": "council_task_status",
-            "description": "查询自己名下任务的状态与暂停/取消标记。",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"task_id": {"type": "string"}},
-                "required": ["task_id"],
-                "additionalProperties": False,
-            },
-        },
-    }
-
-
-# 工具 -> 所需权限（P2-2：MCP 面同样受角色约束）
-TOOL_PERMISSIONS = {
-    "council_list_tasks": ("task.claim", "列出可领取任务"),
-    "council_claim_task": ("task.claim", "领取任务"),
-    "council_heartbeat": ("run.heartbeat", "上报心跳"),
-    "council_submit_result": ("run.submit", "提交结果"),
-    "council_task_status": ("task.read.own", "查询任务状态"),
-}
-
-
-def dispatch_tool(council: Council, ex: dict, name: str, args: dict) -> Any:
-    need = TOOL_PERMISSIONS.get(name)
-    if need:
-        role = ex.get("role_canonical") or R.DENIED_ROLE
-        if not R.can(role, need[0]):
-            raise CouncilError(f"角色「{R.ROLE_LABELS.get(role, role)}」无权{need[1]}")
-    if name == "council_list_tasks":
-        return {"ok": True, "tasks": council.available_tasks()}
-    if name == "council_claim_task":
-        tid = args.get("task_id")
-        if not tid:
-            raise CouncilError("缺少 task_id")
-        return {"ok": True, **council.claim(tid, ex, args.get("idempotency_key"))}
-    if name == "council_heartbeat":
-        ticket = args.get("ticket")
-        if not ticket:
-            raise CouncilError("缺少执行票")
-        return council.heartbeat(ticket, ex, args.get("status", "running"),
-                                 args.get("detail", ""), args.get("idempotency_key"))
-    if name == "council_submit_result":
-        ticket = args.get("ticket")
-        if not ticket:
-            raise CouncilError("缺少执行票")
-        status = args.get("status", "")
-        if status not in ("completed", "failed", "blocked", "cancelled"):
-            raise CouncilError("status 只能是 completed / failed / blocked / cancelled")
-        return council.submit_result(
-            ticket, ex, status, args.get("log", ""), args.get("diff", ""),
-            args.get("tests", ""), args.get("note", ""), args.get("idempotency_key"))
-    if name == "council_task_status":
-        tid = args.get("task_id")
-        if not tid:
-            raise CouncilError("缺少 task_id")
-        t = council.get_task(tid)
-        owner = t.get("executor_id")
-        if not owner or owner != ex.get("id"):
-            raise CouncilError("任务不属于该执行器")
-        return _status_payload(t)
-    raise CouncilError(f"未知工具：{name}")
 
 
 def create_production_app(council: Council, host: str | None = None,

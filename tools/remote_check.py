@@ -130,8 +130,9 @@ def main():
         return 1
 
     # 2. 鉴权必须真的生效（无 token 应被拒）
-    #    服务端对鉴权失败返回 HTTP 200 + JSON-RPC error(-32001)，不是 401，
-    #    所以必须解析 body，只看 HTTP 状态码会误判成「放行」。
+    #    rc9 起 MCP 走官方 SDK，凭据无效按规范回 HTTP 401（body 里仍带
+    #    JSON-RPC error -32001）；rc8 及以前是 200 + error。两种都要认，
+    #    但绝不能只看「有没有返回」——成功也会返回。
     try:
         st, r = rpc("tools/list", {}, None)
         err = r.get("error") or {}

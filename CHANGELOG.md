@@ -4,6 +4,72 @@
 
 ---
 
+## v0.1.1-rc9 — 2026-11-26　第四轮外部审计收口（MCP 传输层换官方 SDK + 两条失败开放）
+
+**主题：把「自己写协议、自己测自己」这条路堵掉，并把两条「认不出就放行」的路径改成失败关闭。**
+
+起点是 Codex 在仓库里提交的 `docs/AUDIT-CODEX-v0.1.1-rc8.md`（六条）。逐条复核：**四条属实、一条口径提醒、一条属实但无法补救**。
+
+### AUDIT-RC8-01：MCP 传输层重复造轮子（高）
+
+`requirements.txt` 声明了 `mcp` 依赖，但全仓 `grep -rn "import mcp"` **零命中**——因为 `/mcp` 那 300 多行 JSON-RPC 是手写的。
+新增 `bigfish/mcp_adapter.py`（532 行），用官方 `StreamableHTTPSessionManager` 承载传输层；
+`tool_specs()` / `dispatch_tool()` 仍是唯一业务入口（工具白名单、权限表、审计、字段上限、维护期 503 全部保留）。
+`bigfish/server.py` 从 630 行降到 393 行，`/mcp` 只剩两行 `Route` 挂载。
+
+**为什么用 `Route` 不用 `Mount`**：`Mount("/mcp")` 对精确路径 `/mcp` 只给 PARTIAL 匹配，
+Starlette 的 `redirect_slashes` 会先回 307，官方客户端不跟。`Route` 的 endpoint 传**类实例**时按 ASGI 调用（函数才会被包成 request-response）。
+
+### AUDIT-RC8-02：未知 reviewer model 失败开放（高）
+
+`role_for_db_row()` 在 `model` 认不出时按名字猜，名字里没 `gpt` 就 `m = "gemini"` → 默认给 `REVIEWER_GEMINI`。
+等于「手工改一行 SQL 写成 `model='claude'` = 拿到审查权限」。改成失败关闭：认不出映射到零权限哨兵 `DENIED_ROLE`。
+
+### R9-01：注册入口与解析入口判定不同源（高）
+
+`register_executor()` 用的是另一套推断（还是默认 gemini），跟 `role_for_db_row()` 不一致——一个拒绝、一个放行。
+改成同一套 `has_gpt`/`has_gem` 判定：只有能唯一判定才推断，两可或都不含则**拒绝注册**并要求显式 `model=gpt|gemini`。
+
+### R9-02：MCP 鉴权失败返回 200 让官方客户端挂死（高）
+
+**这条是「换 SDK 顺手写了个真客户端测试」照出来的**，自己再怎么测服务端也发现不了：
+官方客户端收到 `200 + {jsonrpc, id: null, error}` 时，`JSONRPCMessage.model_validate_json` 报 9 条 pydantic 校验错（`id` 不能为 null），
+然后**既不抛异常也不退出，挂住 3 分钟**。MCP 规范要求凭据无效回 401。已改。
+
+### R9-03 / R9-04：会话管理器与维护期
+
+- `StreamableHTTPSessionManager.run()` 一个实例只能进一次，二次调用抛 `RuntimeError`。改成每请求新建；
+  `stateless_http=True` 本就不存会话，不损失能力，顺带也不需要 app lifespan（`TestClient` 不进 `with` 也能用）。
+- 恢复期间 DB 处于维护模式，新 MCP 请求应该立刻 503，而不是排队等锁超时。在 `McpAsgi` 入口前置判 `maintenance_reason`。
+
+### 协议版本从「硬编码」变「协商」
+
+旧手写版把 `2025-03-26` 当返回值写死。SDK 的行为是客户端要什么版本、在 `SUPPORTED_PROTOCOL_VERSIONS`
+（`2024-11-05 / 2025-03-26 / 2025-06-18 / 2025-11-25`）内就原样回什么。
+因此 `test_initialize_negotiates_protocol` 改成双断言：官方客户端拿到的版本必须在支持列表内，
+且手工指名 `2025-03-26` 的请求必须原样回显。**语义更严，不是放松。**
+
+### 验证
+
+- 平台 A：`Ran 345 tests in 175.583s` / `OK (skipped=1)` / 退出码 0。
+- `tools/selfcheck.py` 16/16（含改后的 401 断言）；`tools/gui_smoke.py` 9/9；`tools/e2e_loopback.py` 22/22。
+- `pyflakes bigfish tools tests` 零输出；`compileall` 通过。
+- **平台 B 待回填**：rc9 的 345 项还没在 Windows 上跑过。新增的 socket 测试起真 uvicorn 进程，
+  Windows 上要盯端口释放与子进程编码——这条不确认，rc9 不算完整验证。
+
+测试 322 → **345**（新增 23 项：`test_v011_rc9.py` 15 + `test_v011_rc9_socket.py` 8）。v0.1.0 的 21 项原样在位。
+
+**schema 未变（仍 v4）**，数据库不需要迁移，回滚也不需要降级。
+
+### 仍未做
+
+- 平台 B（Windows）345 项复跑、GUI 真窗口人工验收、跨设备 MCP 闭环重跑、exe 打包——都还是空的。
+- `AUDIT-RC8-03`（rc8 tag 落在无父提交上）：历史提交补救不了，rc9 起改在真实线性历史上打 tag。
+- `AUDIT-RC8-04`（移动端口径）：核对后确认 `docs/ARCHITECTURE-FUTURE.md:889` 已写「apk — 未实现」，
+  README/CHANGELOG 也没有夸大说法，**只补了一句口径**，没改代码。
+
+---
+
 ## v0.1.1-rc8 — 2026-11-23　第六轮硬化（R7-01 / R7-02 + CI 实测的 R8-01～R8-03）
 
 **主题：把「未知角色 = 执行器」这条提权路径彻底关掉，并把 Windows 上一直靠运气过的那几处按真机证据修好。**

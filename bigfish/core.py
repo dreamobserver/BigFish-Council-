@@ -164,8 +164,20 @@ class Council:
             raise CouncilError("role 只能是 " + " / ".join(sorted(R.DB_ROLES)))
         if role == "reviewer":
             if model is None:
+                # rc9 / AUDIT-RC8-02：注册入口与 role_for_db_row 用同一套判定，
+                # 不能一个失败关闭、一个默认 Gemini —— 否则「名字里没有 gpt」
+                # 就会静默建出一个 Gemini 审查身份，谁都不知道它代表谁。
                 low = (name or "").lower()
-                model = "gpt" if "gpt" in low and "gemini" not in low else "gemini"
+                has_gpt = "gpt" in low
+                has_gem = "gemini" in low
+                if has_gpt and not has_gem:
+                    model = "gpt"
+                elif has_gem and not has_gpt:
+                    model = "gemini"
+                else:
+                    raise CouncilError(
+                        "审查身份必须显式指定 model=gpt 或 model=gemini"
+                        "（名称无法唯一判断，拒绝猜测）")
             if model not in MODELS:
                 raise CouncilError("审查身份的 model 只能是 gpt 或 gemini")
         else:

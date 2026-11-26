@@ -132,7 +132,9 @@ def main() -> int:
     print("权限")
     st, body = post("/mcp", {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
                     "bfc_ex_bogus")
-    check("坏 Token 被拒", st == 200 and body.get("error", {}).get("code") == -32001)
+    # rc9 起 MCP 走官方 SDK，凭据无效按 MCP 规范回 HTTP 401（旧手写版是 200 +
+    # -32001；官方客户端收到 200 的 error 会当成协议错并挂住，见 AUDIT-RC8-01）。
+    check("坏 Token 被拒", st == 401 and body.get("error", {}).get("code") == -32001)
     st, body = get("/api/v1/tasks/available", "bfc_ex_bogus")
     check("HTTP 坏 Token 被拒", st == 401)
     check("审批只能在进程内", council.get_task(task["id"])["status"] == "SUBMITTED")

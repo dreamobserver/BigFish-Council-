@@ -97,10 +97,19 @@ def role_for_db_row(db_role: str, name: str = "", model: str | None = None) -> s
         return base
     if db_role == "reviewer":
         m = (model or "").strip().lower()
-        if m not in ("gpt", "gemini"):
-            low = (name or "").lower()
-            m = "gpt" if ("gpt" in low and "gemini" not in low) else "gemini"
-        return ARCHITECT_GPT if m == "gpt" else REVIEWER_GEMINI
+        if m in ("gpt", "gemini"):
+            return ARCHITECT_GPT if m == "gpt" else REVIEWER_GEMINI
+        # rc9 / AUDIT-RC8-02：模型列认不出时曾经按名称猜、猜不到就默认 Gemini，
+        # 等于「写错一列 model 就能拿到审查票权」。现在只接受名称里能唯一确定的那两种情况，
+        # 其余一律零权限（失败关闭）。空名称 / model=unknown / 写成 claude 都落到这里。
+        low = (name or "").lower()
+        has_gpt = "gpt" in low
+        has_gem = "gemini" in low
+        if has_gpt and not has_gem:
+            return ARCHITECT_GPT
+        if has_gem and not has_gpt:
+            return REVIEWER_GEMINI
+        return DENIED_ROLE
     # rc8 / R7-02：认不出的 db_role 不再兜底成执行器，改为零权限哨兵。
     # 调用方（core.authenticate*）据此直接拒绝该身份。
     return DENIED_ROLE
