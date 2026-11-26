@@ -414,7 +414,7 @@ rc6 只改行为，数据库不用迁移。新增的磁盘痕迹只有租约文�
 
 - 升级前先确认没有第二个 GUI 实例开着数据库（`os.replace` 在 Windows 上会因文件占用失败）；
 - 密钥文件权限走 `icacls`（不是 chmod），首次创建时会自动收紧；
-- **Windows 侧 rc7 已跑通**：`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0（Python 3.14.6 / SQLite 3.50.4；rc6 那次是 265 项全绿 59.975s）。该结果对应 294 项那一版，收尾新增的第 295 项未重跑。rc8 的 322 项由 GitHub Actions 跑过两遍全绿；**rc9 的 345 项尚未在 Windows 上跑**。
+- **Windows 侧 rc7 已跑通**：`Ran 294 tests in 74.232s` + `OK (skipped=1)`，退出码 0（Python 3.14.6 / SQLite 3.50.4；rc6 那次是 265 项全绿 59.975s）。该结果对应 294 项那一版，收尾新增的第 295 项未重跑。rc8 的 322 项由 GitHub Actions 跑过两遍全绿；**rc9 的 345 项在 Windows 上也全绿了**（CI run `45812528363`，py3.11 `178.800s`、py3.13 `198.766s`，均 `OK (skipped=1)`）。
   rc4 的 162 项、rc5 的 244 项、rc6 的 265 项在 Windows 上都属于未验证，升级到新机器后先跑一遍自检再上业务；
 - **Windows 的恢复锁分支（msvcrt）已在真机跑过**：POSIX 走 fcntl/flock，Windows 走 64 槽位模型
   （`SLOTS = 64`，每个写者锁 1 字节，恢复端一次锁整段）；rc7 的 6 项 `TestLeaseAtomicity`（含 1 项 subprocess 起真独立进程）

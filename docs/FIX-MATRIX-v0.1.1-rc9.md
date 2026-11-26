@@ -10,7 +10,7 @@
 | 库结构 | `SCHEMA_VERSION = 4`、`BACKUP_FORMAT_VERSION = 4`，**rc9 未改**，不需要迁移、不需要回滚库 |
 | 全量测试 | 平台 A：**`Ran 345 tests in 175.583s / OK (skipped=1)`**（rc8 的 322 + rc9 新增 23） |
 | 静态检查 | `pyflakes bigfish tools tests` 零输出 `PF_RC=0`；`compileall -q` `RC=0` |
-| 平台 | 平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）345 项全绿；平台 B（Windows）由 GitHub Actions 承担，本轮结果见 `TEST-REPORT` §5 |
+| 平台 | 平台 A（Debian 12 / Python 3.11.2 / SQLite 3.40.1）345 项全绿；平台 B（Windows）由 GitHub Actions 承担，run 45812528363 两档都是 345 全绿（py3.11 178.800s / py3.13 198.766s，OK skipped=1），详见 `TEST-REPORT-v0.1.1-rc9.md` §5 |
 
 状态口径（沿用 rc8，不自行改级）：
 

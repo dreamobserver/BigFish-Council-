@@ -6,7 +6,7 @@
 | 上一版 | `0.1.1-rc8` |
 | 定位 | **发布候选**，不是生产版本。生产/现役仍是 rc2（公司机 3096）或 rc3（本机） |
 | 库结构 | schema **4** / backup format **4**，与 rc8 相同，**无迁移** |
-| 测试 | **345 项**（Linux 全绿 175.583s；Windows 由 GitHub Actions 跑） |
+| 测试 | **345 项**（Linux 全绿 175.583s；Windows 由 GitHub Actions 两档全绿：py3.11 178.800s、py3.13 198.766s，均 OK (skipped=1)，run 45812528363） |
 | 本轮性质 | 只修不重写：MCP 协议层换成官方 SDK + 未知审查身份失败关闭 |
 | 起点 | Codex 对 rc8 的第三方审计（`docs/AUDIT-CODEX-v0.1.1-rc8.md`，185 行） |
 
@@ -101,7 +101,7 @@ MCP 客户端连接方式**没变**（`http://127.0.0.1:3098/mcp` 或直连回�
 
 | 项 | 状态 |
 | --- | --- |
-| 公司机（Windows 11 / Py 3.14.6）跑 345 项 | **未做**，两台 Windows 的 Tailscale 都离线 |
+| 公司机（Windows 11 / Py 3.14.6）跑 345 项 | **未做**，两台 Windows 的 Tailscale 都离线。注意这跟「平台 B 已全绿」不矛盾：CI 跑的是 GitHub 托管的 `windows-latest` 镜像，不是这台装了 PySide6 6.12.0 的机器 |
 | GUI 真窗口验收 | **未做**，只有离屏 9/9 |
 | 跨设备 MCP 闭环（VPS → 公司机） | **未做**，通道不可达；rc2 时曾 11/11 |
 | exe 打包 | **未做**，需 Windows 构建机 |

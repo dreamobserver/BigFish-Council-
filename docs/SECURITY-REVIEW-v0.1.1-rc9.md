@@ -89,7 +89,7 @@ role_for_db_row("reviewer", "",      None)      ->  reviewer_gemini
 | R5 | 维护期 503 无独立断言 | 低 | 未覆盖 | 补一条 MCP 层断言 |
 | R6 | GUI 真窗口验收未做（托盘/最小化/退出） | 低 | 未做 | 人工验收 |
 | R7 | 跨设备 MCP 闭环未重跑；本轮所有 MCP 证据都在回环 | 中 | 未做 | 机器在线时 `tools/remote_check.py --task-id=...` |
-| R8 | 公司机 Py3.14.6 未跑 345 项 | 中 | 未做 | CI 只覆盖 runner，不覆盖真机 |
+| R8 | 公司机 Py3.14.6 未跑 345 项 | 中 | 未做 | CI 的 `windows-latest` 两档已全绿（345 项），但它只覆盖 GitHub 托管镜像，不覆盖用户那台装了 PySide6 6.12.0 的 Windows 11。Windows 专属路径（msvcrt 槽位锁、icacls、TerminateProcess 退出码）在两处都跑到，差异只在真实用户环境留待人工确认 |
 
 ---
 

@@ -54,8 +54,13 @@ Starlette 的 `redirect_slashes` 会先回 307，官方客户端不跟。`Route`
 - 平台 A：`Ran 345 tests in 175.583s` / `OK (skipped=1)` / 退出码 0。
 - `tools/selfcheck.py` 16/16（含改后的 401 断言）；`tools/gui_smoke.py` 9/9；`tools/e2e_loopback.py` 22/22。
 - `pyflakes bigfish tools tests` 零输出；`compileall` 通过。
-- **平台 B 待回填**：rc9 的 345 项还没在 Windows 上跑过。新增的 socket 测试起真 uvicorn 进程，
-  Windows 上要盯端口释放与子进程编码——这条不确认，rc9 不算完整验证。
+- **平台 B 已回填**：CI run `45812528363` 五个 job 全 success，`windows-latest` 上 py3.11
+  `Ran 345 tests in 178.800s`、py3.13 `Ran 345 tests in 198.766s`，均 `OK (skipped=1)`；
+  两个 job 随后 `selfcheck` 16/16、`gui_smoke` 9/9。新增的 8 项真 socket 测试在 Windows 上也过了
+  ——那一类要在 Windows 上起真 uvicorn 进程并释放端口，是最容易挂的。
+- 第一次推（run `45811796405`）挂的是「边界自检」：测试里那个假票据字面量 `bfc_ex_totally-wrong`
+  正好匹配仓库自带的「禁止凭据形态入库」正则。**扫描规则没错，改的是测试**（拆成三段拼接）。
+
 
 测试 322 → **345**（新增 23 项：`test_v011_rc9.py` 15 + `test_v011_rc9_socket.py` 8）。v0.1.0 的 21 项原样在位。
 

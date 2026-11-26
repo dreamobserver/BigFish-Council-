@@ -138,17 +138,38 @@
 | 矩阵 | `os = [ubuntu-latest, windows-latest]` × `python = [3.11, 3.13]` |
 | 步骤 | pyflakes → compileall → Unit tests → Self check |
 | 依赖 | py3.11 用 `requirements.lock`，其余用 `requirements.txt` |
-| 本轮结果 | 见下（发布时回填） |
+| 本轮结果 | **五个 job 全 success**（run `45812528363`），Windows 两档都是 345 项全绿，见 §5.1 |
 
-### 5.1 rc9 的 CI 运行记录
+### 5.1 rc9 的 CI 运行记录（已回填）
 
-> 提交后回填。命令：
-> ```bash
-> TOK=$(cat /home/dsh/.gh_token)
-> curl -s -H "Authorization: token $TOK" \
->   "https://api.github.com/repos/dreamobserver/BigFish-Council-/actions/runs?per_page=3"
-> ```
+第一次推（run `45811796405`，head `44c12510`）挂的是 **「边界自检」**，不是测试：
 
+```
+疑似凭据:
+tests/test_v011_rc9_socket.py:272:            headers = {"Authorization": "***"}
+##[error]Process completed with exit code 1.
+```
+
+根因：那条测试为了验证「坏 Token 被拒」写了个假票据字面量 `bfc_ex_totally-wrong`，
+正好匹配仓库 CI 里「禁止凭据形态入库」的正则 `bfc_(tk|ex|rv|ad)_[A-Za-z0-9_-]{10,}`。
+**扫描规则是对的，不该改**——它拦的正是真票据泄漏。改的是测试：把字面量拆成三段拼接。
+
+第二次推（run `45812528363`，head `8bd62b01`）**五个 job 全 success**：
+
+| job | 结果 |
+|---|---|
+| 边界自检 | success（后缀扫描 + 凭据形态扫描均通过） |
+| ubuntu-latest / py3.11 | success |
+| ubuntu-latest / py3.13 | success |
+| windows-latest / py3.11 | `Ran 345 tests in 178.800s` / `OK (skipped=1)` |
+| windows-latest / py3.13 | `Ran 345 tests in 198.766s` / `OK (skipped=1)` |
+
+两个 Windows job 在单测后都跑了 `tools/selfcheck.py`（通过 16 项，失败 0 项）
+与 `tools/gui_smoke.py`（通过 9 项，失败 0 项）。原始日志归档为
+`ci-run45812528363-windows-py311.txt`（98606 字节）与 `ci-run45812528363-windows-py313.txt`（99175 字节）。
+
+**结论：rc9 的 345 项在 Windows 上也全绿了**，含新加的 8 项真 socket 测试——
+那 8 项要在 Windows 上起真 uvicorn 进程并释放端口，是最容易在 Windows 上挂的一类，它们过了。
 ### 5.2 历史：rc8 期 CI 暴露的两个真问题（作为「CI 有意义」的证据）
 
 rc8 第一次推 CI 时 `windows-latest` 红了 3 项，全是编码/超时，**不是安全逻辑**：
@@ -167,7 +188,7 @@ rc8 第一次推 CI 时 `windows-latest` 红了 3 项，全是编码/超时，**
 | --- | --- | --- |
 | 测试总数 | 322 | **345**（+23） |
 | 平台 A | 322 全绿 | **345 全绿（175.583s）** |
-| 平台 B | CI windows-latest 322 全绿 | CI windows-latest（待回填） |
+| 平台 B | CI windows-latest 322 全绿 | **CI windows-latest 345 全绿**（178.800s / 198.766s） |
 | 平台 C（公司机） | 未跑 | **未跑**（机器离线） |
 | MCP 覆盖手法 | FastAPI `TestClient`（自己测自己） | **真 uvicorn + 官方 SDK 客户端** |
 | 静态检查 | pyflakes 零输出 | 同 |
@@ -179,7 +200,7 @@ rc8 第一次推 CI 时 `windows-latest` 红了 3 项，全是编码/超时，**
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| 平台 B 345 项 | **待 CI** | 提交推送后由 `windows-latest` × py3.11/3.13 承担 |
+| 平台 B 345 项 | **已做** | run `45812528363` 五个 job 全 success，py3.11 `178.800s`、py3.13 `198.766s`，均 `OK (skipped=1)`，见 §5.1 |
 | 平台 C 公司机 Py3.14.6 | **未跑** | 两台 Windows 的 Tailscale 都离线 |
 | GUI 真窗口 | **未做** | 只有 offscreen 9/9；托盘、最小化、退出确认需要人点 |
 | 跨设备 MCP 闭环 | **未做** | rc2 时期曾 11/11，本轮未重跑 |

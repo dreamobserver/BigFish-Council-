@@ -54,7 +54,7 @@
 | rc5 → rc6 的 schema 变化 | **无**：`SCHEMA_VERSION` 仍 4、`BACKUP_FORMAT_VERSION` 仍 4，没有新 `MIGRATIONS` 项；rc5 的库直接能用，不需要迁移，也不需要回滚（rc4 → rc5 那次加的 `executors.disabled_reason` 列 + `idx_executors_enabled` 索引、以及 BACKUP_FORMAT_VERSION 3 → 4 都已是历史） |
 | 测试总数 | **345** 项 |
 | 平台 A | Debian 12 / Python 3.11.2 / SQLite 3.40.1 → **345 项全绿**（`Ran 345 tests in 175.583s`，`OK (skipped=1)`，退出码 0） |
-| 平台 B | Windows（GitHub Actions `windows-latest`，Python 3.11 与 3.13 各跑一遍）：**rc8 期已实测 322 项两遍全绿**（py3.11 `Ran 322 tests in 183.951s`、py3.13 `Ran 322 tests in 197.687s`，均 `OK (skipped=1)`）；**rc9 的 345 项待 CI 回填**——rc9 主要改 MCP 传输层（换官方 SDK），风险集中在协议层，必须有 Windows runner 的结果才算数，本文件写作时尚未推送。CI 同时跑 `tools/selfcheck.py`（16/16）与 `tools/gui_smoke.py`（9/9）。**rc8 那次 CI 第一次推翻「Windows 跑不了全量」这个错误口径**（第一次 CI run `45170828326` 的日志写着 `Ran 318 tests in 181.158s`），并撞出 R8-02 / R8-03，见第 4.4 节与第 7 节 Q11 |
+| 平台 B | Windows（GitHub Actions `windows-latest`，Python 3.11 与 3.13 各跑一遍）→ **两档都是 345 项全绿**：py3.11 `Ran 345 tests in 178.800s`、py3.13 `Ran 345 tests in 198.766s`，均 `OK (skipped=1)`，退出码 0（run `45812528363`，五个 job 全 success）。唯一跳过的是 Windows 无 SIGINT 语义的 `test_graceful_shutdown_on_sigint`。CI 同时跑了 `tools/selfcheck.py`（16/16）与 `tools/gui_smoke.py`（9/9）。**含 8 项真 socket 测试**——它们在 Windows 上要起真 uvicorn 进程并释放端口，是最容易在 Windows 上挂的一类，过了。（rc8 那次 CI 第一次推翻「Windows 跑不了全量」这个错误口径，见第 4.4 节与第 7 节 Q11；rc9 第一次推挂在「边界自检」的凭据形态扫描上，见第 7 节 Q12） |
 | 主语言 | Python 3（标准库 + FastAPI + PySide6） |
 | 许可证 | MIT |
 
@@ -259,8 +259,25 @@ $env:QT_QPA_PLATFORM = "offscreen"   # 必须；不要设 LD_LIBRARY_PATH
 # rc6 实测（修完两个 Windows 专属缺陷之后）：
 #   Ran 265 tests in 59.975s / OK (skipped=1) / UT_RC=0
 # rc7 实测：Ran 294 tests in 74.232s / OK (skipped=1) / UT_RC=0
+#
+# rc9 起平台 B 的权威证据不再靠这台机器，而是 CI 每次跑（见 4.4 节）：
+#   rc9 → Ran 345 tests in 178.800s / OK (skipped=1)  (windows-latest, py3.11)
+# 手工跑这一节保留，因为它是发现 R8-02/R8-03 的地方；CI 用的是 GitHub 托管镜像，
+# 不是装了 PySide6 6.12.0 的 Windows 11。
 # 首次跑是 FAILED (errors=2, skipped=1)，见第 5 节 U5 与第 7 节 Q9
 ```
+
+### 4.3 其它工具
+
+| 工具 | 结果 | 说明 |
+|---|---|---|
+| `tools/selfcheck.py` | 16/16 | 端到端自检：建任务→双审→批准→claim→心跳→回传→验收 |
+| `tools/gui_smoke.py` | 9/9 | 离屏 GUI：主窗口构造、五页存在、五页可切换、状态栏、待审批识别 |
+| `tools/e2e_loopback.py` | 22/22 | **同机回环**演练（明确声明不是跨设备） |
+| `tools/net_check.py` | 分层 | 第 1–3 层本地；第 4 层跨机需真实对端 |
+| `tools/remote_check.py` | 默认只读 | 真实 MCP JSON-RPC；必须显式 `--task-id` 才碰数据 |
+| `pyflakes bigfish tools tests` | 无输出 | 两平台都通过（平台 B 装的是 pyflakes 4.1.0） |
+| `compileall bigfish tools tests` | exit 0 | 两平台都可编 |
 
 ### 4.4 平台 B 的证据从「一台机器」换成「CI 每次跑」
 
@@ -276,25 +293,24 @@ run 45174755219（head fdd5c12，全部 5 个 job success）
   与 tools/gui_smoke.py（通过 9 项，失败 0 项）
 ```
 
+rc9 的 345 项同样由这条通道跑（run `45812528363`，head `8bd62b01`，五个 job 全 success）：
+
+```
+  windows-latest / py3.11 → Ran 345 tests in 178.800s / OK (skipped=1)
+  windows-latest / py3.13 → Ran 345 tests in 198.766s / OK (skipped=1)
+  两个 job 都随后跑了 tools/selfcheck.py（通过 16 项，失败 0 项）
+  与 tools/gui_smoke.py（通过 9 项，失败 0 项）
+```
+
+第一次推（run `45811796405`）挂的不是测试，是「边界自检」——测试里那个假票据字面量
+命中了仓库自带的凭据形态正则。扫描规则是对的，改的是测试，详见第 7 节 Q12。
 第一次 CI（run `45170828326`，head fa37e2e）是 `Ran 318 tests in 181.158s` 加两处失败——
 它推翻了一个从 rc6 一直背到 rc7 的错误口径：**「Windows 跑不了全量」是假的，318 项全跑完了，只是挂 1 项**。
 那一项（时钟粒度）与另一个 job 自检崩在 cp1252 上的问题，就是 R8-02 / R8-03。详见第 7 节 Q11。
-### 4.3 其它工具
-
-| 工具 | 结果 | 说明 |
-|---|---|---|
-| `tools/selfcheck.py` | 16/16 | 端到端自检：建任务→双审→批准→claim→心跳→回传→验收 |
-| `tools/gui_smoke.py` | 9/9 | 离屏 GUI：主窗口构造、五页存在、五页可切换、状态栏、待审批识别 |
-| `tools/e2e_loopback.py` | 22/22 | **同机回环**演练（明确声明不是跨设备） |
-| `tools/net_check.py` | 分层 | 第 1–3 层本地；第 4 层跨机需真实对端 |
-| `tools/remote_check.py` | 默认只读 | 真实 MCP JSON-RPC；必须显式 `--task-id` 才碰数据 |
-| `pyflakes bigfish tools tests` | 无输出 | 两平台都通过（平台 B 装的是 pyflakes 4.1.0） |
-| `compileall bigfish tools tests` | exit 0 | 两平台都可编 |
-
-### 4.4 跨设备链路
+### 4.5 跨设备链路
 
 VPS → Windows 客户端 `100.64.0.11:3096`（Tailscale Serve，仅 tailnet，无 Funnel）的 MCP 闭环 11/11
-曾在 **rc2** 打通。**rc3 / rc4 / rc5 / rc6 都未重跑跨机闭环**，这四版只证了本地监听校验与协议语义。
+曾在 **rc2** 打通。**rc3 / rc4 / rc5 / rc6 / rc7 / rc8 / rc9 都未重跑跨机闭环**，这几版只证了本地监听校验与协议语义。rc9 换了 MCP 传输层，跨机那条链路的客户端实现也变了，**更应该在真机上重跑一次才算数**。
 请不要把同机回环（`tools/e2e_loopback.py` 的 22/22）当成跨设备证据。
 
 ---
@@ -307,7 +323,7 @@ VPS → Windows 客户端 `100.64.0.11:3096`（Tailscale Serve，仅 tailnet，�
 | U2 | 开机自启 | 未注册；`tools/start-headless.ps1` 真机未跑通（`schtasks /TR` 嵌套引号报 `-2147467259`） | WMI 起的进程重启即消失 |
 | U3 | DSH MCP 连接导入 | 未导入（需人类授权） | 现在 DSH 尚未接上这个控制台 |
 | U4 | rc3 / rc4 / rc5 / rc6 跨机闭环 | 未重跑 | 跨机证据仍是 rc2 时期的 |
-| U5 | 平台 B 的完整回归 | **rc8 期已由 CI 承担**：`windows-latest` 上 Python 3.11 与 3.13 各跑一遍 322 项，两遍都是 `OK (skipped=1)`（183.951s / 197.687s），见第 4.4 节。**rc9 的 345 项尚未推 CI**，写作时只有平台 A 的结果 | 覆盖的是 GitHub 托管 runner 的 Windows Server 镜像，不是用户那台装了 PySide6 6.12.0 的 Windows 11；GUI 冒烟在 runner 上通过，真窗口仍未人眼确认（U1） |
+| U5 | 平台 B 的完整回归 | **rc8 期已由 CI 承担**：`windows-latest` 上 Python 3.11 与 3.13 各跑一遍 322 项，两遍都是 `OK (skipped=1)`（183.951s / 197.687s），见第 4.4 节。**rc9 的 345 项也已由 CI 跑完**（run `45812528363`，Windows 两档都是 `OK (skipped=1)`，178.800s / 198.766s） | 覆盖的是 GitHub 托管 runner 的 Windows Server 镜像，不是用户那台装了 PySide6 6.12.0 的 Windows 11；GUI 冒烟在 runner 上通过，真窗口仍未人眼确认（U1） |
 | U9 | 平台 B 复跑新增用例 | **rc8 已做**（322 项两版本都跑完，含 rc7 的 28 项与 rc8 的 27 项）；**rc9 未做**——新增的 23 项（`test_v011_rc9.py` 15 + `test_v011_rc9_socket.py` 8）还没在 Windows 上跑过。socket 那 8 项起的是真 uvicorn 进程，Windows 上要盯端口释放与子进程编码 | rc9 的协议层修复在 Windows 上是否同样成立，目前无证据 |
 | U6 | 平台 B 静态检查 | **已补齐**：`pyflakes bigfish tools tests` 零输出（退出码 0，pyflakes 4.1.0）、`compileall -q` 退出码 0 | Windows 侧的名字类检查与平台 A 同口径 |
 | U7 | 类型检查（mypy / pyright） | 未接 | 只有 `compileall` 与 `pyflakes` 两道 |
