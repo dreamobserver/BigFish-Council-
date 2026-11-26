@@ -33,7 +33,7 @@ Windows 本地控制中心 + Tailscale 私网 + VPS DSH 执行器。
 | 附件 | 用途 |
 | --- | --- |
 | `bfc-src-v011rc9.zip` | rc9 完整源码树。解压即用，不需要 git |
-| `SHA256SUMS.txt` | 上一条 zip 的 sha256，外加包内 115 个文件的逐行 sha256 |
+| `SHA256SUMS.txt` | 上一条 zip 的 sha256，外加包内每个文件的逐行 sha256（可 sha256sum -c 校验） |
 
 > 每个附件的**文件数与 sha256 以 Release 页与本包内 `SHA256SUMS.txt` 为准**——
 > 写进 README 的固定值会在下一次重打包时失真，这里不再钉死。

@@ -1,17 +1,17 @@
 # BigFish Council v0.1.1-rc9 -- SHA256 checksums
-# generated: 2026-11-26T12:07:36Z
+# generated: 2026-11-26T12:18:20Z
 # attachment line: release asset bfc-src-v011rc9.zip (same tree, packaged)
 # scope: every file in this tag except this list itself
 # verify: sha256sum -c SHA256SUMS    (shasum -a 256 -c on macOS)
 
-0b889c35fbb35b8ffd2d9e819f98d8ea8915d0b218bdcd0edab2110137dea19c  bfc-src-v011rc9.zip
+0017b01ac272be55e13a7d5d8884d7e4def692f130479c2e44a3e60dbf93d300  bfc-src-v011rc9.zip
 
 93e677d9aa01bf99d3b27fc5b9283925d6d602a5e67756f17654c457dc2b0a65  .gitignore
 388441ef012adbc4f31039f48f4b974731fc957b9022ce8593ea2b778c59dc65  AUDIT.md
 aba3ff09f5dbf6fc4d8ba547b9c5f41c10cad8239129c9f09b96d7dde5e93901  AUDIT_REVIEW.md
 864b17c3bca2bbf7b77bc1ffeedcc69004a7a98700002ec5a013a87227d798bc  CHANGELOG.md
 95960ae8ae934a85b931fea96a00386f47cf21e57f1b94d2526ac5eacdb51b58  LICENSE
-7300934d89fa873a440b6fe4a2209228b181511f2889f3f4f93e6486aa8d927b  README.md
+00d07b1563ede2ecb4d2c0fac73e9dcd9e55982302fa7cae343b5695cfdbd941  README.md
 9220bd4c928af7b8ad3d6e30a2cb1f20796a90b082bdf1584d42ebe6ed5ac5c4  build.ps1
 c4383b49fad410e85bf43186b3b68a884aaef37d09a796ebfe34a839dba99a5e  dsh-mcp-bigfish.json
 c5bdfba7e1bb07fc47a6be3ca23e1528aa9628620870cf57115ecda85fd49a46  install-task.ps1
