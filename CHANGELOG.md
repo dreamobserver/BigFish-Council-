@@ -58,7 +58,7 @@ Starlette 的 `redirect_slashes` 会先回 307，官方客户端不跟。`Route`
   `Ran 345 tests in 178.800s`、py3.13 `Ran 345 tests in 198.766s`，均 `OK (skipped=1)`；
   两个 job 随后 `selfcheck` 16/16、`gui_smoke` 9/9。新增的 8 项真 socket 测试在 Windows 上也过了
   ——那一类要在 Windows 上起真 uvicorn 进程并释放端口，是最容易挂的。
-- 第一次推（run `45811796405`）挂的是「边界自检」：测试里那个假票据字面量 `bfc_ex_totally-wrong`
+- 第一次推（run `45811796405`）挂的是「边界自检」：测试里那个假票据字面量（`bfc_` 与 `ex_` 拼出来的串）
   正好匹配仓库自带的「禁止凭据形态入库」正则。**扫描规则没错，改的是测试**（拆成三段拼接）。
 
 

@@ -150,7 +150,7 @@ tests/test_v011_rc9_socket.py:272:            headers = {"Authorization": "***"}
 ##[error]Process completed with exit code 1.
 ```
 
-根因：那条测试为了验证「坏 Token 被拒」写了个假票据字面量 `bfc_ex_totally-wrong`，
+根因：那条测试为了验证「坏 Token 被拒」写了个假票据字面量（`bfc_` 与 `ex_` 拼出来的串），
 正好匹配仓库 CI 里「禁止凭据形态入库」的正则 `bfc_(tk|ex|rv|ad)_[A-Za-z0-9_-]{10,}`。
 **扫描规则是对的，不该改**——它拦的正是真票据泄漏。改的是测试：把字面量拆成三段拼接。
 
