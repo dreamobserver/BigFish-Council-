@@ -1,10 +1,10 @@
 # BigFish Council v0.1.1-rc9 -- SHA256 checksums
-# generated: 2026-11-26T11:32:55Z
+# generated: 2026-11-26T11:38:52Z
 # attachment line: release asset bfc-src-v011rc9.zip (same tree, packaged)
 # scope: every file in this tag except this list itself
 # verify: sha256sum -c SHA256SUMS    (shasum -a 256 -c on macOS)
 
-0751f4653d887e989778b95abc0a5fafcfba03b1d67a9ad1dcaf5c855a812f54  bfc-src-v011rc9.zip
+7bd659b8717a5ad946ca0cb8ace88872e342688b54e16b07ebdbae2c374770f7  bfc-src-v011rc9.zip
 
 93e677d9aa01bf99d3b27fc5b9283925d6d602a5e67756f17654c457dc2b0a65  .gitignore
 ccf35bb3f4ea0c2abddac463181d587694cf2f8bc2fbea479ab3861f6b7265be  AUDIT.md
@@ -122,7 +122,7 @@ b6e9684d85572e342d0cc29131beb703d11029e56c091ed1f830dd9c6d119ffa  tests/test_v01
 aa635a307369ed3a8a3f48ae691850c158d9890603c72f6d4f3e943ad11cabc9  tests/test_v011_rc7.py
 2bc58c942662d10b3c3e663a0c46a0179217ecea981f6946ed001b3c69c5fce5  tests/test_v011_rc8.py
 0753a96d87b35f22866077a9ad9ffaf0396fd7696272a99e7042c6ed095311c2  tests/test_v011_rc9.py
-e1b0d181025e39d096fb7a6e87a33a3efb318da3d357f03b819d039d3aa986f8  tests/test_v011_rc9_socket.py
+caea48082c6dc2ee9cd011bbc9e05bd8ad4a0067f10327e90014df11a967589c  tests/test_v011_rc9_socket.py
 aa40979ca75ed3799a078a305061f8bf73c65d2b62fca62752cb81cf8a3e7981  tools/bfc-proxy.mjs
 76477162f550e28231969e8dc54132b8827025819f6ed5d0b6cf049535ae9eff  tools/dev_setup.sh
 a56d3df03e72e5cb16a004eb459d7fc2e6617cef545a87993eda114a7521d027  tools/e2e_loopback.py
